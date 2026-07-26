@@ -1,0 +1,381 @@
+[
+  {
+    "id": "index_tts2",
+    "family": "index_tts2",
+    "displayName": "Index TTS 2",
+    "description": "IndexTTS2 零样本语音合成：参考音频克隆音色，支持情感参考音频 / 情感向量 / 情感文本三种情感控制，输出 22050Hz 单声道 WAV。",
+    "descriptionEn": "IndexTTS2 zero-shot TTS: clones the voice from a reference audio, supports emotion control via emotion reference audio / emotion vector / emotion text, outputs 22050Hz mono WAV.",
+    "category": "tts",
+    "serverTask": "tts",
+    "modes": ["offline"],
+    "inputs": { "text": "required", "audio": "none", "voiceRef": "required" },
+    "outputType": "audio",
+    "language": { "values": ["auto", "zh", "en"], "default": "auto" },
+    "task": "tts",
+    "requiredFiles": [
+      "config.yaml",
+      "bpe.model",
+      "w2v-bert-2.0/",
+      "bigvgan/",
+      "qwen0.6bemo4-merge/"
+    ],
+    "backends": ["cpu", "cuda", "vulkan", "metal"],
+    "paramSchema": {
+      "emotionModes": ["none", "emotion_audio", "emotion_vector", "emotion_text"],
+      "emotionLabels": ["高兴", "愤怒", "悲伤", "恐惧", "反感", "低落", "惊讶", "自然"],
+      "emotionLabelsEn": ["Happy", "Angry", "Sad", "Fearful", "Disgusted", "Melancholic", "Surprised", "Calm"],
+      "text": { "type": "string", "required": true },
+      "voice_ref": { "type": "path", "required": true, "hint": "运行 hub 的机器上的本地 wav 路径", "hintEn": "Local wav path on the machine running the hub" },
+      "language": { "type": "enum", "values": ["auto", "zh", "en"], "default": "auto" },
+      "emotion_alpha": { "type": "number", "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05 },
+      "temperature": { "type": "number", "default": 0.8, "min": 0.1, "max": 2.0, "step": 0.05 },
+      "top_p": { "type": "number", "default": 0.8, "min": 0.0, "max": 1.0, "step": 0.05 },
+      "top_k": { "type": "integer", "default": 30, "min": 0, "max": 100, "step": 1 },
+      "repetition_penalty": { "type": "number", "default": 10.0, "min": 1.0, "max": 20.0, "step": 0.5 },
+      "max_tokens": { "type": "integer", "default": 1500, "min": 50, "max": 8192, "step": 50 },
+      "interval_silence_ms": { "type": "integer", "default": 200, "min": 0, "max": 5000, "step": 50 },
+      "seed": { "type": "integer", "default": null, "min": 0, "max": 2147483647, "step": 1 }
+    }
+  },
+  {
+    "id": "citrinet_asr",
+    "family": "citrinet_asr",
+    "displayName": "Citrinet ASR",
+    "description": "NVIDIA Citrinet 英文语音识别，轻量快速。",
+    "descriptionEn": "NVIDIA Citrinet English speech recognition, lightweight and fast.",
+    "category": "asr",
+    "serverTask": "asr",
+    "modes": ["offline"],
+    "inputs": { "text": "none", "audio": "required", "voiceRef": "none" },
+    "outputType": "text",
+    "paramSchema": {}
+  },
+  {
+    "id": "higgs_audio_stt",
+    "family": "higgs_audio_stt",
+    "displayName": "Higgs Audio STT",
+    "description": "Higgs Audio 语音理解模型，支持多语言转写与流式识别。",
+    "descriptionEn": "Higgs Audio speech understanding model, supports multilingual transcription and streaming recognition.",
+    "category": "asr",
+    "serverTask": "asr",
+    "modes": ["offline", "streaming"],
+    "inputs": { "text": "none", "audio": "required", "voiceRef": "none" },
+    "outputType": "text",
+    "language": { "values": ["auto", "en", "zh", "ja", "ko"], "default": "en" },
+    "paramSchema": {
+      "max_new_tokens": { "type": "integer", "default": 1024, "min": 16, "max": 8192, "step": 16 }
+    }
+  },
+  {
+    "id": "hviske_asr",
+    "family": "hviske_asr",
+    "displayName": "Hviske ASR（丹麦语）",
+    "displayNameEn": "Hviske ASR (Danish)",
+    "description": "丹麦语语音识别模型（Hviske）。",
+    "descriptionEn": "Danish speech recognition model (Hviske).",
+    "category": "asr",
+    "serverTask": "asr",
+    "modes": ["offline"],
+    "inputs": { "text": "none", "audio": "required", "voiceRef": "none" },
+    "outputType": "text",
+    "language": { "values": ["da"], "default": "da" },
+    "paramSchema": {
+      "temperature": { "type": "number", "default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05 },
+      "top_p": { "type": "number", "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05 },
+      "top_k": { "type": "integer", "default": 50, "min": 0, "max": 200, "step": 1 },
+      "num_beams": { "type": "integer", "default": 1, "min": 1, "max": 8, "step": 1 }
+    }
+  },
+  {
+    "id": "nemotron_asr",
+    "family": "nemotron_asr",
+    "displayName": "Nemotron ASR",
+    "description": "NVIDIA Nemotron 流式语音识别，支持语言提示。",
+    "descriptionEn": "NVIDIA Nemotron streaming speech recognition with language hints.",
+    "category": "asr",
+    "serverTask": "asr",
+    "modes": ["offline", "streaming"],
+    "inputs": { "text": "none", "audio": "required", "voiceRef": "none" },
+    "outputType": "text",
+    "language": { "values": ["auto", "en-US", "da-DK"], "default": "auto" },
+    "paramSchema": {
+      "max_tokens": { "type": "integer", "default": 1024, "min": 16, "max": 8192, "step": 16 }
+    }
+  },
+  {
+    "id": "qwen3_asr",
+    "family": "qwen3_asr",
+    "displayName": "Qwen3 ASR",
+    "description": "通义 Qwen3 语音识别，自动语言检测，支持上下文文本。",
+    "descriptionEn": "Qwen3 speech recognition with automatic language detection and context text support.",
+    "category": "asr",
+    "serverTask": "asr",
+    "modes": ["offline"],
+    "inputs": { "text": "optional", "audio": "required", "voiceRef": "none" },
+    "outputType": "text",
+    "language": { "values": ["auto", "zh", "en", "ja", "ko", "yue"], "default": "auto" },
+    "paramSchema": {
+      "max_new_tokens": { "type": "integer", "default": 512, "min": 16, "max": 4096, "step": 16 }
+    }
+  },
+  {
+    "id": "vibevoice_asr",
+    "family": "vibevoice_asr",
+    "displayName": "VibeVoice ASR（长音频说话人分段）",
+    "displayNameEn": "VibeVoice ASR (long-audio speaker diarization)",
+    "description": "VibeVoice 长音频转写，支持说话人分段输出。",
+    "descriptionEn": "VibeVoice long-audio transcription with speaker diarization output.",
+    "category": "asr",
+    "serverTask": "asr",
+    "modes": ["offline"],
+    "inputs": { "text": "none", "audio": "required", "voiceRef": "none" },
+    "outputType": "text",
+    "paramSchema": {
+      "max_new_tokens": { "type": "integer", "default": 32768, "min": 1024, "max": 65536, "step": 1024 }
+    }
+  },
+  {
+    "id": "qwen3_forced_aligner",
+    "family": "qwen3_forced_aligner",
+    "displayName": "Qwen3 强制对齐",
+    "displayNameEn": "Qwen3 Forced Aligner",
+    "description": "Qwen3 强制对齐：给定精确文本生成词级时间戳。",
+    "descriptionEn": "Qwen3 forced alignment: generates word-level timestamps given exact text.",
+    "category": "other",
+    "serverTask": "align",
+    "modes": ["offline"],
+    "inputs": { "text": "required", "audio": "required", "voiceRef": "none" },
+    "outputType": "json",
+    "language": { "values": ["zh", "en", "ja", "ko", "yue"], "default": "zh" },
+    "paramSchema": {}
+  },
+  {
+    "id": "htdemucs",
+    "family": "htdemucs",
+    "displayName": "HTDemucs 音乐分离",
+    "displayNameEn": "HTDemucs Music Separation",
+    "description": "HTDemucs 音乐源分离，输出人声 / 鼓 / 贝斯 / 其他四轨。",
+    "descriptionEn": "HTDemucs music source separation, outputs four stems: vocals / drums / bass / other.",
+    "category": "sep",
+    "serverTask": "sep",
+    "modes": ["offline"],
+    "inputs": { "text": "none", "audio": "required", "voiceRef": "none" },
+    "outputType": "stems",
+    "paramSchema": {}
+  },
+  {
+    "id": "mel_band_roformer",
+    "family": "mel_band_roformer",
+    "displayName": "Mel-Band RoFormer 音乐分离",
+    "displayNameEn": "Mel-Band RoFormer Music Separation",
+    "description": "Mel-Band RoFormer 音乐源分离，高保真多轨输出。",
+    "descriptionEn": "Mel-Band RoFormer music source separation with high-fidelity multi-stem output.",
+    "category": "sep",
+    "serverTask": "sep",
+    "modes": ["offline"],
+    "inputs": { "text": "none", "audio": "required", "voiceRef": "none" },
+    "outputType": "stems",
+    "paramSchema": {}
+  },
+  {
+    "id": "miocodec",
+    "family": "miocodec",
+    "displayName": "MioCodec 声转换",
+    "displayNameEn": "MioCodec Voice Conversion",
+    "description": "MioCodec 零样本声转换，保留内容替换音色，输出 44.1kHz。",
+    "descriptionEn": "MioCodec zero-shot voice conversion: preserves content while replacing the voice, outputs 44.1kHz.",
+    "category": "other",
+    "serverTask": "vc",
+    "modes": ["offline"],
+    "inputs": { "text": "none", "audio": "required", "voiceRef": "required" },
+    "outputType": "audio",
+    "paramSchema": {}
+  },
+  {
+    "id": "miotts",
+    "family": "miotts",
+    "displayName": "MioTTS",
+    "description": "MioTTS 语音合成，参考音频克隆音色，输出 44.1kHz。",
+    "descriptionEn": "MioTTS speech synthesis, clones the voice from a reference audio, outputs 44.1kHz.",
+    "category": "tts",
+    "serverTask": "tts",
+    "modes": ["offline"],
+    "inputs": { "text": "required", "audio": "none", "voiceRef": "required" },
+    "outputType": "audio",
+    "paramSchema": {
+      "max_tokens": { "type": "integer", "default": 700, "min": 50, "max": 4096, "step": 50 },
+      "temperature": { "type": "number", "default": 0.8, "min": 0.1, "max": 2.0, "step": 0.05 },
+      "top_k": { "type": "integer", "default": 50, "min": 0, "max": 200, "step": 1 },
+      "top_p": { "type": "number", "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05 }
+    }
+  },
+  {
+    "id": "irodori_tts",
+    "family": "irodori_tts",
+    "displayName": "Irodori TTS（日语）",
+    "displayNameEn": "Irodori TTS (Japanese)",
+    "description": "Irodori 日语语音合成，高保真 48kHz 输出。",
+    "descriptionEn": "Irodori Japanese speech synthesis, high-fidelity 48kHz output.",
+    "category": "tts",
+    "serverTask": "tts",
+    "modes": ["offline"],
+    "inputs": { "text": "required", "audio": "none", "voiceRef": "optional" },
+    "outputType": "audio",
+    "language": { "values": ["ja"], "default": "ja" },
+    "paramSchema": {
+      "num_inference_steps": { "type": "integer", "default": 40, "min": 1, "max": 200, "step": 1 },
+      "caption": { "type": "string", "default": "" }
+    }
+  },
+  {
+    "id": "moss_tts_local",
+    "family": "moss_tts_local",
+    "displayName": "MOSS TTS Local",
+    "description": "MOSS TTS 本地大模型语音合成，可选零样本克隆，输出 48kHz。",
+    "descriptionEn": "MOSS TTS local large-model speech synthesis with optional zero-shot cloning, outputs 48kHz.",
+    "category": "tts",
+    "serverTask": "tts",
+    "modes": ["offline"],
+    "inputs": { "text": "required", "audio": "none", "voiceRef": "optional" },
+    "outputType": "audio",
+    "paramSchema": {
+      "reference_text": { "type": "string", "default": "" },
+      "temperature": { "type": "number", "default": 1.7, "min": 0.1, "max": 3.0, "step": 0.05 },
+      "top_p": { "type": "number", "default": 0.8, "min": 0.0, "max": 1.0, "step": 0.05 },
+      "top_k": { "type": "integer", "default": 25, "min": 0, "max": 200, "step": 1 },
+      "max_tokens": { "type": "integer", "default": 4096, "min": 50, "max": 8192, "step": 50 }
+    }
+  },
+  {
+    "id": "moss_tts_nano",
+    "family": "moss_tts_nano",
+    "displayName": "MOSS TTS Nano",
+    "description": "MOSS TTS Nano 轻量语音合成，输出 48kHz。",
+    "descriptionEn": "MOSS TTS Nano lightweight speech synthesis, outputs 48kHz.",
+    "category": "tts",
+    "serverTask": "tts",
+    "modes": ["offline"],
+    "inputs": { "text": "required", "audio": "none", "voiceRef": "optional" },
+    "outputType": "audio",
+    "paramSchema": {
+      "reference_text": { "type": "string", "default": "" },
+      "temperature": { "type": "number", "default": 1.7, "min": 0.1, "max": 3.0, "step": 0.05 },
+      "top_p": { "type": "number", "default": 0.8, "min": 0.0, "max": 1.0, "step": 0.05 },
+      "top_k": { "type": "integer", "default": 25, "min": 0, "max": 200, "step": 1 },
+      "max_tokens": { "type": "integer", "default": 300, "min": 50, "max": 8192, "step": 50 }
+    }
+  },
+  {
+    "id": "omnivoice",
+    "family": "omnivoice",
+    "displayName": "OmniVoice",
+    "description": "OmniVoice 语音合成：参考音频克隆或指令式声音设计，输出 24kHz。",
+    "descriptionEn": "OmniVoice speech synthesis: voice cloning from a reference audio or instruction-based voice design, outputs 24kHz.",
+    "category": "tts",
+    "serverTask": "tts",
+    "modes": ["offline"],
+    "inputs": { "text": "required", "audio": "none", "voiceRef": "optional" },
+    "outputType": "audio",
+    "paramSchema": {
+      "reference_text": { "type": "string", "default": "" },
+      "instruct": { "type": "string", "default": "" },
+      "num_inference_steps": { "type": "integer", "default": 32, "min": 1, "max": 100, "step": 1 },
+      "guidance_scale": { "type": "number", "default": 2.0, "min": 0.0, "max": 20.0, "step": 0.1 },
+      "speed": { "type": "number", "default": 1.0, "min": 0.5, "max": 2.0, "step": 0.05 }
+    }
+  },
+  {
+    "id": "qwen3_tts",
+    "family": "qwen3_tts",
+    "displayName": "Qwen3 TTS",
+    "description": "Qwen3 TTS 三变体：Base 克隆 / CustomVoice 内置音色 / VoiceDesign 指令设计，输出 24kHz。",
+    "descriptionEn": "Qwen3 TTS with three variants: Base cloning / CustomVoice built-in voices / VoiceDesign instruction-based design, outputs 24kHz.",
+    "category": "tts",
+    "serverTask": "tts",
+    "modes": ["offline"],
+    "inputs": { "text": "required", "audio": "none", "voiceRef": "optional" },
+    "outputType": "audio",
+    "paramSchema": {
+      "speaker": { "type": "enum", "values": ["Aiden", "Dylan", "Eric", "Ono_anna", "Ryan", "Serena", "Sohee", "Uncle_fu", "Vivian"], "default": "Vivian" },
+      "instruct": { "type": "string", "default": "" },
+      "reference_text": { "type": "string", "default": "" },
+      "temperature": { "type": "number", "default": 0.9, "min": 0.1, "max": 2.0, "step": 0.05 },
+      "top_k": { "type": "integer", "default": 50, "min": 0, "max": 200, "step": 1 },
+      "top_p": { "type": "number", "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05 },
+      "repetition_penalty": { "type": "number", "default": 1.05, "min": 1.0, "max": 2.0, "step": 0.01 }
+    }
+  },
+  {
+    "id": "stable_audio",
+    "family": "stable_audio",
+    "displayName": "Stable Audio 音乐生成",
+    "displayNameEn": "Stable Audio Music Generation",
+    "description": "Stable Audio 英文提示词生成音乐 / 音效，44.1kHz 立体声。",
+    "descriptionEn": "Stable Audio generates music / sound effects from English prompts, 44.1kHz stereo.",
+    "category": "other",
+    "serverTask": "gen",
+    "modes": ["offline"],
+    "inputs": { "text": "required", "audio": "none", "voiceRef": "none" },
+    "outputType": "audio",
+    "paramSchema": {
+      "duration_seconds": { "type": "integer", "default": 120, "min": 1, "max": 190, "step": 1 },
+      "num_inference_steps": { "type": "integer", "default": 8, "min": 1, "max": 100, "step": 1 },
+      "guidance_scale": { "type": "number", "default": 1.0, "min": 0.0, "max": 20.0, "step": 0.1 },
+      "negative_prompt": { "type": "string", "default": "" }
+    }
+  },
+  {
+    "id": "supertonic",
+    "family": "supertonic",
+    "displayName": "Supertonic",
+    "description": "Supertonic 多语言语音合成，内置 10 个音色，输出约 44.1kHz。",
+    "descriptionEn": "Supertonic multilingual speech synthesis with 10 built-in voices, outputs about 44.1kHz.",
+    "category": "tts",
+    "serverTask": "tts",
+    "modes": ["offline"],
+    "inputs": { "text": "required", "audio": "none", "voiceRef": "none" },
+    "outputType": "audio",
+    "language": { "values": ["en", "ko", "es", "pt", "fr"], "default": "en" },
+    "paramSchema": {
+      "voice_id": { "type": "enum", "values": ["M1", "M2", "M3", "M4", "M5", "F1", "F2", "F3", "F4", "F5"], "default": "M1" },
+      "num_inference_steps": { "type": "integer", "default": 8, "min": 1, "max": 100, "step": 1 },
+      "speaking_rate": { "type": "number", "default": 1.05, "min": 0.5, "max": 2.0, "step": 0.05 }
+    }
+  },
+  {
+    "id": "vevo2",
+    "family": "vevo2",
+    "displayName": "Vevo 2 歌声转换",
+    "displayNameEn": "Vevo 2 Singing Voice Conversion",
+    "description": "Vevo 2 多路由语音 / 歌声工具：TTS、声转换、歌声合成与编辑，输出 24kHz。",
+    "descriptionEn": "Vevo 2 multi-route speech / singing voice toolkit: TTS, voice conversion, singing voice synthesis and editing, outputs 24kHz.",
+    "category": "other",
+    "serverTask": "tts",
+    "modes": ["offline"],
+    "inputs": { "text": "optional", "audio": "optional", "voiceRef": "required" },
+    "outputType": "audio",
+    "paramSchema": {
+      "task_route": { "type": "enum", "values": ["zero_shot_tts", "text_to_singing", "svs", "style_preserved_vc", "style_converted_vc", "editing", "style_preserved_svc", "style_converted_svc", "singing_style_conversion", "humming_to_singing", "instrument_to_singing"], "default": "zero_shot_tts" }
+    }
+  },
+  {
+    "id": "voxcpm2",
+    "family": "voxcpm2",
+    "displayName": "VoxCPM2",
+    "description": "VoxCPM2 语音合成，可选参考音频克隆。",
+    "descriptionEn": "VoxCPM2 speech synthesis with optional reference-audio cloning.",
+    "category": "tts",
+    "serverTask": "tts",
+    "modes": ["offline"],
+    "inputs": { "text": "required", "audio": "none", "voiceRef": "optional" },
+    "outputType": "audio",
+    "paramSchema": {
+      "reference_text": { "type": "string", "default": "" },
+      "temperature": { "type": "number", "default": 1.0, "min": 0.1, "max": 2.0, "step": 0.05 },
+      "max_tokens": { "type": "integer", "default": 4096, "min": 50, "max": 8192, "step": 50 },
+      "num_inference_steps": { "type": "integer", "default": 10, "min": 1, "max": 100, "step": 1 },
+      "guidance_scale": { "type": "number", "default": 2.0, "min": 0.0, "max": 20.0, "step": 0.1 },
+      "retry_badcase": { "type": "boolean", "default": true }
+    }
+  }
+]

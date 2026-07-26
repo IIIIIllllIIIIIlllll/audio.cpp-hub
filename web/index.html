@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>audio.cpp-hub</title>
+  <script>document.documentElement.dataset.theme = localStorage.getItem("hub-theme") || "dark";
+  document.documentElement.lang = (localStorage.getItem("hub-lang") || (navigator.language||"zh")).toLowerCase().startsWith("zh") ? "zh-CN" : "en";</script>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="logo">audio.cpp-hub</span>
+      <span class="subtitle" data-i18n="header.subtitle">audiocpp_server 进程管理 &amp; 音频工作台</span>
+    </div>
+    <div class="header-actions">
+      <button id="lang-toggle" class="theme-btn" data-i18n-title="header.langTitle" title="切换语言 / Switch language">EN</button>
+      <button id="settings-btn" class="theme-btn" data-i18n-title="header.settingsTitle" title="可执行文件设置">⚙️</button>
+      <button id="theme-toggle" class="theme-btn" data-i18n-title="header.themeTitle" title="切换主题">☀️</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- 左栏：模型 + 实例 -->
+    <aside id="left">
+      <h2 data-i18n="nav.models">模型</h2>
+      <div id="model-list" class="card-list"></div>
+      <h2 data-i18n="nav.instances">实例</h2>
+      <div id="instance-list" class="card-list"></div>
+    </aside>
+
+    <!-- 右栏：常驻工作区 -->
+    <section id="right">
+      <div id="workspace">
+
+        <!-- 实例状态条 -->
+        <div id="instance-bar">
+          <span class="bar-label" data-i18n="instance.barLabel">实例</span>
+          <select id="instance-select"></select>
+          <span id="instance-pill" class="pill warn" data-i18n="instance.noReady">没有就绪实例</span>
+          <button id="instance-stop" class="stop-btn" disabled data-i18n="instance.stopCurrent">停止当前实例</button>
+          <button id="launch-open-btn" class="btn" data-i18n="instance.create">创建服务</button>
+        </div>
+
+        <!-- TTS 面板 -->
+        <div class="card panel-card" id="panel-tts">
+          <h2 id="tts-title">语音合成</h2>
+          <label><span data-i18n="tts.textLabel">合成文本</span><textarea id="tts-text" rows="4" data-i18n-placeholder="tts.textPlaceholder" placeholder="要合成的文本"></textarea></label>
+          <div id="tts-language-row"></div>
+          <div id="tts-variant-row"></div>
+          <div id="tts-voice-block"><div id="voice-picker"></div></div>
+          <div id="tts-speaker-row"></div>
+          <div id="tts-instruct-row"></div>
+          <div id="tts-ref-text-row"></div>
+          <div id="tts-enum-row"></div>
+
+          <div id="tts-emotion-block" class="hidden">
+            <div class="tabs">
+              <button class="tab active" data-mode="none" data-i18n="emotion.tab.none">无</button>
+              <button class="tab" data-mode="emotion_audio" data-i18n="emotion.tab.emotion_audio">情感参考音频</button>
+              <button class="tab" data-mode="emotion_vector" data-i18n="emotion.tab.emotion_vector">情感向量</button>
+              <button class="tab" data-mode="emotion_text" data-i18n="emotion.tab.emotion_text">情感文本</button>
+            </div>
+            <div id="emotion-pane-none" class="emotion-pane" data-i18n="emotion.paneNone">跟随说话人参考音频的情感。</div>
+            <div id="emotion-pane-emotion_audio" class="emotion-pane hidden">
+              <div id="emotion-picker"></div>
+            </div>
+            <div id="emotion-pane-emotion_vector" class="emotion-pane hidden">
+              <div id="emotion-sliders"></div>
+            </div>
+            <div id="emotion-pane-emotion_text" class="emotion-pane hidden">
+              <label><span data-i18n="emotion.textLabel">情感描述</span><input id="tts-emotion-text" type="text" data-i18n-placeholder="emotion.textPlaceholder" placeholder="例如：愤怒、悲伤"></label>
+              <div class="hint" data-i18n="emotion.hintAuto">留空则从合成文本自动推断。</div>
+            </div>
+            <div id="emotion-alpha-row" class="hidden">
+              <label><span data-i18n="emotion.alphaLabel">情感强度 emotion_alpha：</span><span id="emotion-alpha-val">1.00</span>
+                <input id="tts-emotion-alpha" type="range" min="0" max="1" step="0.05" value="1">
+              </label>
+            </div>
+          </div>
+
+          <details id="tts-advanced"><summary data-i18n="common.advanced">高级参数</summary><div class="grid" id="tts-advanced-grid"></div></details>
+          <button id="tts-submit" class="btn" data-i18n="tts.submit">合成</button>
+          <div id="tts-msg" class="msg"></div>
+          <div id="tts-stats" class="task-stats"></div>
+          <div id="tts-result" class="hidden">
+            <audio id="tts-player" controls></audio>
+            <a id="tts-download" class="btn-ghost" download="tts.wav" data-i18n="tts.download">下载 wav</a>
+          </div>
+        </div>
+
+        <!-- ASR 面板 -->
+        <div class="card panel-card hidden" id="panel-asr">
+          <h2 id="asr-title">语音识别</h2>
+          <div id="asr-audio-picker"></div>
+          <div id="asr-language-row"></div>
+          <div id="asr-text-row"></div>
+          <details id="asr-advanced" class="hidden"><summary data-i18n="common.advanced">高级参数</summary><div class="grid" id="asr-advanced-grid"></div></details>
+          <button id="asr-submit" class="btn" data-i18n="asr.submit">识别</button>
+          <div id="asr-msg" class="msg"></div>
+          <div id="asr-stats" class="task-stats"></div>
+          <div id="asr-result" class="hidden">
+            <div class="asr-text-card">
+              <div id="asr-text"></div>
+              <button id="asr-copy" class="btn-ghost" data-i18n="asr.copy">复制</button>
+            </div>
+            <details id="asr-json-details"><summary data-i18n="asr.details">详细输出</summary><pre id="asr-json" class="json-pre"></pre></details>
+          </div>
+        </div>
+
+        <!-- SEP 面板 -->
+        <div class="card panel-card hidden" id="panel-sep">
+          <h2 id="sep-title">音频分离</h2>
+          <div class="hint" data-i18n="sep.hint">输入 44.1kHz 音乐效果最佳。</div>
+          <div id="sep-audio-picker"></div>
+          <button id="sep-submit" class="btn" data-i18n="sep.submit">分离</button>
+          <div id="sep-msg" class="msg"></div>
+          <div id="sep-stats" class="task-stats"></div>
+          <div id="sep-result"></div>
+        </div>
+
+        <!-- OTHER 面板 -->
+        <div class="card panel-card hidden" id="panel-other">
+          <h2 id="other-title">工具</h2>
+          <div id="other-text-row"></div>
+          <div id="other-audio-block"><div id="other-audio-picker"></div></div>
+          <div id="other-voice-block"><div id="other-voice-picker"></div></div>
+          <div id="other-language-row"></div>
+          <div id="other-fields"></div>
+          <label><span data-i18n="other.extraLabel">额外参数（JSON，合并进请求）</span><textarea id="other-extra" rows="3" placeholder='{"seed": 42}'></textarea></label>
+          <button id="other-submit" class="btn" data-i18n="other.submit">运行</button>
+          <div id="other-msg" class="msg"></div>
+          <div id="other-stats" class="task-stats"></div>
+          <div id="other-result"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="hint" data-i18n="footer.hint">提示：音频可上传 / 录制 / 从音色库选择，也可填写运行 hub 的机器上的本机路径。</footer>
+  <div id="toast-root"></div>
+
+  <!-- 创建服务 modal（原“启动新实例”卡片） -->
+  <div id="launch-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title"><span data-i18n="launch.title">创建服务</span> — <span id="quick-launch-model"></span></span>
+        <button id="launch-modal-close" class="modal-close">×</button>
+      </div>
+      <div class="grid">
+        <label><span data-i18n="launch.profile">启动配置</span>
+          <div class="input-btn-row">
+            <select id="launch-profile"><option value="" data-i18n="launch.profileNew">（新配置）</option></select>
+            <button id="profile-save-btn" type="button" data-i18n="launch.profileSave">存为配置</button>
+            <button id="profile-update-btn" type="button" class="hidden" data-i18n="launch.profileUpdate">更新</button>
+            <button id="profile-del-btn" type="button" class="hidden" data-i18n="launch.profileDelete">删除</button>
+          </div>
+        </label>
+        <label><span data-i18n="launch.exec">可执行文件</span><select id="launch-exec"></select></label>
+        <label><span data-i18n="launch.weights">权重目录路径（本机路径）</span>
+          <div class="input-btn-row">
+            <input id="launch-weights" type="text" data-i18n-placeholder="launch.weightsPlaceholder" placeholder="例如 D:/models/index_tts2">
+            <button id="weights-browse-btn" type="button" data-i18n="launch.browse">浏览…</button>
+          </div>
+        </label>
+        <label><span data-i18n="launch.backend">后端</span>
+          <select id="launch-backend">
+            <option value="cpu">cpu</option>
+            <option value="cuda">cuda</option>
+            <option value="vulkan">vulkan</option>
+            <option value="metal">metal</option>
+            <option value="hip">hip(rocm)</option>
+          </select>
+        </label>
+        <label><span data-i18n="launch.device">设备号（可选）</span><input id="launch-device" type="number" min="0" data-i18n-placeholder="launch.devicePlaceholder" placeholder="留空自动"></label>
+        <label><span data-i18n="launch.port">端口（可选）</span><input id="launch-port" type="number" min="1024" max="65535" data-i18n-placeholder="launch.portPlaceholder" placeholder="留空自动分配"></label>
+        <label><span data-i18n="launch.threads">线程数（可选）</span><input id="launch-threads" type="number" min="1" data-i18n-placeholder="launch.threadsPlaceholder" placeholder="留空自动（CPU 核心数）"></label>
+      </div>
+      <div id="exec-empty-hint" class="hint hidden"><span data-i18n="launch.execEmpty">尚未配置可执行文件</span>
+        <button id="exec-goto-btn" class="btn-ghost" data-i18n="launch.execGoto">去配置</button>
+      </div>
+      <button id="launch-btn" class="btn" data-i18n="launch.submit">启动实例</button>
+      <div id="launch-msg" class="msg"></div>
+    </div>
+  </div>
+
+  <!-- 任务处理中等待遮罩 -->
+  <div id="busy-overlay" class="modal-overlay hidden">
+    <div class="busy-box">
+      <div class="spinner"></div>
+      <div id="busy-label" data-i18n="busy.label">正在处理中…</div>
+      <div id="busy-elapsed" class="busy-elapsed">0.0s</div>
+    </div>
+  </div>
+
+  <!-- 可执行文件管理 modal -->
+  <div id="exec-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title" data-i18n="exec.title">可执行文件管理</span>
+        <button id="exec-modal-close" class="modal-close">×</button>
+      </div>
+      <div class="exec-body">
+        <div id="exec-list-section">
+          <div class="exec-section-title" data-i18n="exec.listTitle">已添加的可执行文件</div>
+          <div id="exec-list" class="exec-list"></div>
+        </div>
+        <div id="exec-form-section">
+          <div class="exec-section-title" data-i18n="exec.addTitle">添加可执行文件</div>
+          <div class="exec-add">
+            <label><span data-i18n="exec.name">名称</span><input id="exec-name" type="text" data-i18n-placeholder="exec.namePlaceholder" placeholder="例如 CUDA 版"></label>
+            <label><span data-i18n="exec.path">路径</span>
+              <div class="input-btn-row">
+                <input id="exec-path" type="text" data-i18n-placeholder="exec.pathPlaceholder" placeholder="可执行文件路径，或其所在目录">
+                <button id="exec-browse-btn" type="button" data-i18n="launch.browse">浏览…</button>
+              </div>
+            </label>
+            <label><span data-i18n="exec.note">备注（可选）</span><input id="exec-note" type="text"></label>
+            <button id="exec-add-btn" class="btn" data-i18n="exec.add">添加</button>
+            <div id="exec-msg" class="msg"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/i18n.js"></script>
+  <script src="/wav.js"></script>
+  <script src="/file-browser.js"></script>
+  <script src="/audio-picker.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
