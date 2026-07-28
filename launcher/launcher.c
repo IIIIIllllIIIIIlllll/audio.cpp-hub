@@ -4,6 +4,7 @@
   #include <windows.h>
   #include <shellapi.h>
   #include <libloaderapi.h>
+  #define STRSAFE_NO_DEPRECATE
   #include <strsafe.h>
   #define PATH_SEP ';'
   #define PATH_SEP_STR ";"
