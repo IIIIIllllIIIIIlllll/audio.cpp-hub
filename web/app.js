@@ -33,6 +33,7 @@ let ttsVariant = "base";
 let ttsLanguageSel = null;
 let asrLanguageSel = null;
 let otherLanguageSel = null;
+let ttsAudioUrl = null;
 
 const $ = (id) => document.getElementById(id);
 const el = (html) => {
@@ -86,6 +87,18 @@ async function loadModels() {
   renderWorkspace();
 }
 
+/* 已配置 = 有使用记录（Profile）：权重目录有效，且对应的 audiocpp_server 可执行文件有效 */
+function modelConfigured(m) {
+  const p = profiles.find(x => x.modelId === m.id && x.weightsPath);
+  if (!p || p.weightsExists === false) return false;
+  if (p.executableId) {
+    const ex = executables.find(e => e.id === p.executableId);
+    return !!ex && ex.exists;
+  }
+  // 老配置可能没有 executableId：任意可执行文件有效即可
+  return executables.some(e => e.exists);
+}
+
 function renderModelList() {
   const list = $("model-list");
   list.innerHTML = "";
@@ -97,11 +110,13 @@ function renderModelList() {
     title.textContent = categoryName(cat);
     list.appendChild(title);
     for (const m of group) {
+      const usable = modelConfigured(m);
       const card = document.createElement("div");
-      card.className = "card" + (m.id === selectedModelId ? " selected" : "");
-      card.innerHTML = `<div class="card-title">${I18N.pick(m, "displayName")}</div>
+      card.className = "card" + (m.id === selectedModelId ? " selected" : "") + (usable ? "" : " unconfigured");
+      card.innerHTML = `<div class="card-title">${I18N.pick(m, "displayName")}${usable ? "" : ` <span class="badge unconfigured">${t("model.unconfigured")}</span>`}</div>
         <div class="card-family">${m.family} <span class="cat-badge cat-${cat}">${categoryName(cat)}</span></div>
         <div class="card-desc">${I18N.pick(m, "description")}</div>`;
+      if (!usable) card.title = t("model.unconfiguredTip");
       card.onclick = () => {
         selectedModelId = m.id;
         renderModelList();
@@ -134,7 +149,7 @@ $("exec-goto-btn").onclick = openExecModal;
 $("exec-modal-close").onclick = closeExecModal;
 execModal.onclick = (e) => { if (e.target === execModal) closeExecModal(); };
 
-/* ---------- 创建服务 modal ---------- */
+/* ---------- 启动模型 modal ---------- */
 const launchModal = $("launch-modal");
 function openLaunchModal() {
   $("launch-msg").textContent = "";
@@ -153,6 +168,20 @@ $("weights-browse-btn").onclick = async () => {
   const path = await FileBrowser.open({
     mode: "dir",
     title: t("launch.weightsBrowseTitle"),
+    startPath: $("launch-weights").value.trim()
+  });
+  if (path) {
+    $("launch-weights").value = path;
+    $("launch-weights").dispatchEvent(new Event("input"));
+  }
+};
+
+/* 权重也可以是单个 GGUF 文件（audio.cpp 支持直接加载 .gguf） */
+$("weights-gguf-btn").onclick = async () => {
+  const path = await FileBrowser.open({
+    mode: "file",
+    title: t("launch.weightsGgufBrowseTitle"),
+    extensions: [".gguf"],
     startPath: $("launch-weights").value.trim()
   });
   if (path) {
@@ -191,6 +220,8 @@ async function loadExecutables() {
   }
   renderExecList();
   updateLaunchExec();
+  // 可执行文件有效性也影响模型卡片的已配置/黯淡状态
+  if (models.length) renderModelList();
 }
 
 function renderExecList() {
@@ -286,6 +317,8 @@ async function loadProfiles() {
     return;
   }
   renderLaunchProfiles();
+  // 配置变化会影响模型列表的可用/黯淡展示
+  if (models.length) renderModelList();
 }
 
 /* 下拉只显示当前模型的配置 */
@@ -308,9 +341,7 @@ function selectedProfile() {
 }
 
 function updateProfileButtons() {
-  const has = !!selectedProfile();
-  $("profile-update-btn").classList.toggle("hidden", !has);
-  $("profile-del-btn").classList.toggle("hidden", !has);
+  $("profile-del-btn").classList.toggle("hidden", !selectedProfile());
 }
 
 /* 选中配置 → 回填表单 */
@@ -381,16 +412,20 @@ $("profile-save-btn").onclick = async () => {
   }
 };
 
-$("profile-update-btn").onclick = async () => {
-  const p = selectedProfile();
-  if (!p) return;
-  if (await saveProfile("/api/profiles/" + p.id, "PUT", collectProfileFields(p.name), "profile.updateFailed")) {
+/* 启动模型时顺带动态保存参数：已有配置则原地更新，否则新建“默认”配置 */
+async function autoSaveProfile() {
+  try {
+    const existing = selectedProfile() || profiles.find(p => p.modelId === selectedModelId);
+    const fields = collectProfileFields(existing ? existing.name : t("profile.autoName"));
+    if (!fields.weightsPath) return;
+    await fetch(existing ? "/api/profiles/" + existing.id : "/api/profiles", {
+      method: existing ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fields)
+    });
     await loadProfiles();
-    $("launch-profile").value = p.id;
-    updateProfileButtons();
-    showToast("info", t("profile.updated", { name: p.name }));
-  }
-};
+  } catch (e) { /* 动态保存失败不影响启动结果 */ }
+}
 
 $("profile-del-btn").onclick = async () => {
   const p = selectedProfile();
@@ -434,6 +469,8 @@ $("launch-btn").onclick = async () => {
     closeLaunchModal();
     showToast("info", t("launch.started"));
     refreshInstances();
+    // 启动成功即视为一次使用：动态保存参数，模型随之变为“已配置”
+    autoSaveProfile();
   } catch (e) {
     msg.textContent = t("launch.failed") + t("common.colon") + e.message;
   }
@@ -609,9 +646,10 @@ function makeTrackRow(name, b64) {
   const url = URL.createObjectURL(b64ToBlob(b64, "audio/wav"));
   const row = el(`<div class="track-row">
     <span class="track-name"></span>
-    <audio controls></audio>
+    <audio controls preload="auto"></audio>
     <a class="btn-ghost"></a>
   </div>`);
+  row.dataset.blobUrl = url;
   row.querySelector(".track-name").textContent = name;
   row.querySelector("audio").src = url;
   const a = row.querySelector("a");
@@ -619,6 +657,14 @@ function makeTrackRow(name, b64) {
   a.href = url;
   a.download = name + ".wav";
   return row;
+}
+
+/* 清空结果容器前回收其中 track-row 的 objectURL，避免内存泄漏 */
+function clearResult(container) {
+  for (const row of container.querySelectorAll(".track-row[data-blob-url]")) {
+    URL.revokeObjectURL(row.dataset.blobUrl);
+  }
+  container.innerHTML = "";
 }
 
 /* ---------- 工作区：按 category 切换面板 ---------- */
@@ -888,7 +934,10 @@ $("tts-submit").onclick = async () => {
       msg.textContent = t("tts.noAudio") + JSON.stringify(json).substring(0, 300);
       return;
     }
+    // 替换前回收上一次的 objectURL，避免每次合成泄漏一个 Blob
+    if (ttsAudioUrl) URL.revokeObjectURL(ttsAudioUrl);
     const url = URL.createObjectURL(b64ToBlob(json.audio, "audio/wav"));
+    ttsAudioUrl = url;
     $("tts-player").src = url;
     const download = $("tts-download");
     download.href = url;
@@ -1008,7 +1057,7 @@ $("asr-copy").onclick = () => {
 /* ---------- SEP 面板 ---------- */
 function renderSepPanel(m) {
   $("sep-title").textContent = t("sep.title") + " — " + I18N.pick(m, "displayName");
-  $("sep-result").innerHTML = "";
+  clearResult($("sep-result"));
   $("sep-msg").textContent = "";
   $("sep-stats").textContent = "";
 }
@@ -1017,7 +1066,7 @@ $("sep-submit").onclick = async () => {
   const msg = $("sep-msg");
   const btn = $("sep-submit");
   msg.textContent = "";
-  $("sep-result").innerHTML = "";
+  clearResult($("sep-result"));
   if (!activeInstanceId) { msg.textContent = t("instance.noReady"); return; }
 
   const audio = sepAudioPicker.getValue();
@@ -1073,7 +1122,7 @@ function renderOtherPanel(m) {
     fields.appendChild(paramInput(key, p, "other-field"));
   }
 
-  $("other-result").innerHTML = "";
+  clearResult($("other-result"));
   $("other-msg").textContent = "";
   $("other-stats").textContent = "";
 }
@@ -1083,7 +1132,7 @@ $("other-submit").onclick = async () => {
   const msg = $("other-msg");
   const btn = $("other-submit");
   msg.textContent = "";
-  $("other-result").innerHTML = "";
+  clearResult($("other-result"));
   if (!activeInstanceId) { msg.textContent = t("instance.noReady"); return; }
   const inputs = m.inputs || { text: "none", audio: "none", voiceRef: "none" };
 
@@ -1183,6 +1232,7 @@ applyLangBtn();
 buildEmotionSliders();
 loadModels();
 loadExecutables();
+loadProfiles();
 refreshInstances();
 refreshEvents();
 setInterval(() => {

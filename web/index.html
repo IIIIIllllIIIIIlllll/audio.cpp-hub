@@ -40,7 +40,7 @@
           <select id="instance-select"></select>
           <span id="instance-pill" class="pill warn" data-i18n="instance.noReady">没有就绪实例</span>
           <button id="instance-stop" class="stop-btn" disabled data-i18n="instance.stopCurrent">停止当前实例</button>
-          <button id="launch-open-btn" class="btn" data-i18n="instance.create">创建服务</button>
+          <button id="launch-open-btn" class="btn" data-i18n="instance.create">启动模型</button>
         </div>
 
         <!-- TTS 面板 -->
@@ -85,7 +85,7 @@
           <div id="tts-msg" class="msg"></div>
           <div id="tts-stats" class="task-stats"></div>
           <div id="tts-result" class="hidden">
-            <audio id="tts-player" controls></audio>
+            <audio id="tts-player" controls preload="auto"></audio>
             <a id="tts-download" class="btn-ghost" download="tts.wav" data-i18n="tts.download">下载 wav</a>
           </div>
         </div>
@@ -141,27 +141,27 @@
   <footer class="hint" data-i18n="footer.hint">提示：音频可上传 / 录制 / 从音色库选择，也可填写运行 hub 的机器上的本机路径。</footer>
   <div id="toast-root"></div>
 
-  <!-- 创建服务 modal（原“启动新实例”卡片） -->
+  <!-- 启动模型 modal -->
   <div id="launch-modal" class="modal-overlay hidden">
     <div class="modal">
       <div class="modal-header">
-        <span class="modal-title"><span data-i18n="launch.title">创建服务</span> — <span id="quick-launch-model"></span></span>
+        <span class="modal-title"><span data-i18n="launch.title">启动模型</span> — <span id="quick-launch-model"></span></span>
         <button id="launch-modal-close" class="modal-close">×</button>
       </div>
       <div class="grid">
-        <label><span data-i18n="launch.profile">启动配置</span>
+        <label class="span-all"><span data-i18n="launch.profile">启动配置</span>
           <div class="input-btn-row">
             <select id="launch-profile"><option value="" data-i18n="launch.profileNew">（新配置）</option></select>
             <button id="profile-save-btn" type="button" data-i18n="launch.profileSave">存为配置</button>
-            <button id="profile-update-btn" type="button" class="hidden" data-i18n="launch.profileUpdate">更新</button>
             <button id="profile-del-btn" type="button" class="hidden" data-i18n="launch.profileDelete">删除</button>
           </div>
         </label>
         <label><span data-i18n="launch.exec">可执行文件</span><select id="launch-exec"></select></label>
-        <label><span data-i18n="launch.weights">权重目录路径（本机路径）</span>
+        <label class="span-all"><span data-i18n="launch.weights">权重目录或 GGUF 文件（本机路径）</span>
           <div class="input-btn-row">
-            <input id="launch-weights" type="text" data-i18n-placeholder="launch.weightsPlaceholder" placeholder="例如 D:/models/index_tts2">
-            <button id="weights-browse-btn" type="button" data-i18n="launch.browse">浏览…</button>
+            <input id="launch-weights" type="text" data-i18n-placeholder="launch.weightsPlaceholder" placeholder="例如 D:/models/index_tts2 或 D:/models/qwen3-tts.gguf">
+            <button id="weights-browse-btn" type="button" data-i18n="launch.browseDir">选择目录</button>
+            <button id="weights-gguf-btn" type="button" data-i18n="launch.browseGguf">选择 GGUF</button>
           </div>
         </label>
         <label><span data-i18n="launch.backend">后端</span>
@@ -180,7 +180,7 @@
       <div id="exec-empty-hint" class="hint hidden"><span data-i18n="launch.execEmpty">尚未配置可执行文件</span>
         <button id="exec-goto-btn" class="btn-ghost" data-i18n="launch.execGoto">去配置</button>
       </div>
-      <button id="launch-btn" class="btn" data-i18n="launch.submit">启动实例</button>
+      <button id="launch-btn" class="btn" data-i18n="launch.submit">启动</button>
       <div id="launch-msg" class="msg"></div>
     </div>
   </div>
@@ -213,7 +213,7 @@
             <label><span data-i18n="exec.path">路径</span>
               <div class="input-btn-row">
                 <input id="exec-path" type="text" data-i18n-placeholder="exec.pathPlaceholder" placeholder="可执行文件路径，或其所在目录">
-                <button id="exec-browse-btn" type="button" data-i18n="launch.browse">浏览…</button>
+                <button id="exec-browse-btn" type="button" data-i18n="launch.browse">浏览</button>
               </div>
             </label>
             <label><span data-i18n="exec.note">备注（可选）</span><input id="exec-note" type="text"></label>

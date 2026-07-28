@@ -193,7 +193,12 @@ footer { flex: none; }
 .badge.starting { background: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
 .badge.error { background: var(--err); }
 .badge.stopped { background: #8a8f9c; }
+.badge.unconfigured { background: #8a8f9c; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+/* 无启动配置的模型：黯淡展示，表示暂不可用 */
+.card.unconfigured { opacity: 0.45; }
+.card.unconfigured:hover { opacity: 0.7; }
 
 .pill {
   padding: 4px 14px;
@@ -615,6 +620,11 @@ footer { padding: 4px 24px 18px; }
   padding: 18px 20px;
   animation: modal-in 0.22s ease;
 }
+
+/* 启动模型弹窗：字段多且权重行有 3 个控件，加宽；固定两列，长字段独占整行 */
+#launch-modal .modal { width: min(880px, 94vw); }
+#launch-modal .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#launch-modal .grid .span-all { grid-column: 1 / -1; }
 .modal-header {
   display: flex;
   justify-content: space-between;

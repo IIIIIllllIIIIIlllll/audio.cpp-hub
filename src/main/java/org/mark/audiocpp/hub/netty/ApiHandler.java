@@ -104,7 +104,20 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
                         Jsons.error("EXEC_NOT_FOUND", Map.of("id", id), "可执行文件不存在: " + id), request);
             }
         } else if (method.equals(HttpMethod.GET) && path.equals("/api/profiles")) {
-            sendJson(ctx, HttpResponseStatus.OK, Jsons.GSON.toJson(profileRegistry.list()), request);
+            // 附带 weightsExists：前端据此判断权重是否仍然有效（决定模型卡片是否黯淡）。
+            // 权重可以是目录（safetensors / 含 model.gguf），也可以是单个 .gguf 文件。
+            List<JsonObject> profiles = profileRegistry.list();
+            for (JsonObject p : profiles) {
+                String weightsPath = p.has("weightsPath") ? p.get("weightsPath").getAsString() : "";
+                boolean exists = false;
+                if (!weightsPath.isEmpty()) {
+                    Path wp = Path.of(weightsPath);
+                    exists = Files.isDirectory(wp)
+                            || (Files.isRegularFile(wp) && weightsPath.toLowerCase().endsWith(".gguf"));
+                }
+                p.addProperty("weightsExists", exists);
+            }
+            sendJson(ctx, HttpResponseStatus.OK, Jsons.GSON.toJson(profiles), request);
         } else if (method.equals(HttpMethod.POST) && path.equals("/api/profiles")) {
             handleProfileSave(ctx, request, null);
         } else if (method.equals(HttpMethod.PUT) && path.startsWith("/api/profiles/")) {

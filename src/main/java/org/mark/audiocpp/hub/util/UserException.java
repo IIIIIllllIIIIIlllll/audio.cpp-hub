@@ -8,7 +8,9 @@ import java.util.Map;
  */
 public class UserException extends RuntimeException {
 
-    private final String code;
+    private static final long serialVersionUID = 1L;
+    
+	private final String code;
     private final Map<String, Object> params;
 
     public UserException(String code, String message) {

@@ -58,7 +58,6 @@ window.WavUtil = (function () {
     const s = sec - m * 60;
     return m + ":" + s.toFixed(1).padStart(4, "0");
   }
-
   /** 字节数 → 可读字符串 */
   function formatSize(bytes) {
     if (bytes == null) return "-";
@@ -67,5 +66,30 @@ window.WavUtil = (function () {
     return (bytes / 1024 / 1024).toFixed(2) + " MB";
   }
 
-  return { decodeToAudioBuffer, audioBufferToWav, formatDuration, formatSize };
+  /**
+   * 预热音频输出设备。首次播放 <audio> 时浏览器才打开系统输出流，
+   * 设备挂起 / 蓝牙休眠时打开要几百 ms，这段时间的样本会被丢弃（开头少一个音节）。
+   * 在首次用户手势时就让一个无声 AudioContext 常驻 running，保持输出流常开。
+   */
+  let warmCtx = null;
+  function warmAudioOutput() {
+    if (warmCtx) return;
+    try {
+      warmCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const silence = warmCtx.createBuffer(1, warmCtx.sampleRate, warmCtx.sampleRate);
+      const src = warmCtx.createBufferSource();
+      src.buffer = silence;
+      src.loop = true;
+      const gain = warmCtx.createGain();
+      gain.gain.value = 0;
+      src.connect(gain).connect(warmCtx.destination);
+      src.start();
+      warmCtx.resume();
+    } catch (e) { warmCtx = null; }
+  }
+  for (const evt of ["pointerdown", "keydown", "touchstart"]) {
+    document.addEventListener(evt, warmAudioOutput, { once: true, passive: true });
+  }
+
+  return { decodeToAudioBuffer, audioBufferToWav, formatDuration, formatSize, warmAudioOutput };
 })();

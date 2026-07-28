@@ -295,6 +295,7 @@
     "modes": ["offline"],
     "inputs": { "text": "required", "audio": "none", "voiceRef": "optional" },
     "outputType": "audio",
+    "language": { "values": ["Auto", "chinese", "english", "japanese", "korean", "french", "german", "italian", "portuguese", "russian", "spanish"], "default": "Auto" },
     "paramSchema": {
       "speaker": { "type": "enum", "values": ["Aiden", "Dylan", "Eric", "Ono_anna", "Ryan", "Serena", "Sohee", "Uncle_fu", "Vivian"], "default": "Vivian" },
       "instruct": { "type": "string", "default": "" },
