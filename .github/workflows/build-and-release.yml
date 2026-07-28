@@ -1,0 +1,466 @@
+name: Build and Release
+
+permissions:
+  contents: write
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 设置 JDK 26
+        uses: actions/setup-java@v4
+        with:
+          java-version: '26'
+          distribution: 'temurin'
+
+      - name: 验证 Java 版本
+        run: |
+          echo "Java 版本:"
+          java -version
+          javac -version
+
+      - name: 创建构建目录
+        run: |
+          mkdir -p build/classes
+          mkdir -p build/lib
+
+      - name: 复制依赖项到 build/lib
+        run: |
+          cp lib/*.jar build/lib/
+          echo "复制依赖项:"
+          ls -lh build/lib/
+
+      - name: 构建 classpath
+        run: |
+          CLASSPATH=""
+          for jar in lib/*.jar; do
+            if [ -z "$CLASSPATH" ]; then
+              CLASSPATH="$jar"
+            else
+              CLASSPATH="$CLASSPATH:$jar"
+            fi
+          done
+          echo "CLASSPATH=$CLASSPATH" >> $GITHUB_ENV
+
+      - name: 获取构建元信息
+        id: get_version
+        run: |
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            TAG=${GITHUB_REF#refs/tags/}
+            APP_VERSION=${TAG#v}
+          else
+            TAG="dev-${GITHUB_SHA::7}"
+            APP_VERSION="$TAG"
+          fi
+          VERSION="$TAG"
+          CREATED_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "app_version=$APP_VERSION" >> $GITHUB_OUTPUT
+          echo "created_time=$CREATED_TIME" >> $GITHUB_OUTPUT
+          echo "TAG=$TAG" >> $GITHUB_ENV
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "APP_VERSION=$APP_VERSION" >> $GITHUB_ENV
+          echo "CREATED_TIME=$CREATED_TIME" >> $GITHUB_ENV
+          echo "构建 Tag: $TAG"
+          echo "程序版本: $APP_VERSION"
+          echo "构建时间: $CREATED_TIME"
+
+      - name: 注入构建信息
+        run: |
+          python3 - << 'PY'
+          import os
+          from pathlib import Path
+          path = Path("src/main/java/org/mark/audiocpp/hub/BuildInfo.java")
+          text = path.read_text(encoding="utf-8")
+          replacements = {
+              "{tag}": os.environ["TAG"],
+              "{version}": os.environ["APP_VERSION"],
+              "{createdTime}": os.environ["CREATED_TIME"],
+          }
+          for source, target in replacements.items():
+              text = text.replace(source, target)
+          path.write_text(text, encoding="utf-8")
+          print(path.read_text(encoding="utf-8"))
+          PY
+
+      - name: 编译 Java 源码
+        run: |
+          find src/main/java -name "*.java" -print0 | xargs -0 javac \
+            -source 21 \
+            -target 21 \
+            -encoding UTF-8 \
+            -d build/classes \
+            -cp "$CLASSPATH"
+
+      - name: 复制 resources 到 classes 目录
+        run: |
+          if [ -d "src/main/resources" ]; then
+            cp -r src/main/resources/* build/classes/
+            echo "已复制 resources 到 classes 目录"
+            echo "classes 目录内容:"
+            ls -la build/classes/
+          else
+            echo "resources 目录不存在，跳过复制"
+          fi
+
+      - name: 复制 webui 静态文件到 build 目录
+        run: |
+          cp -r web build/web
+          echo "已复制 web 目录:"
+          ls -la build/web/
+
+      - name: 验证编译结果
+        run: |
+          echo "编译输出文件:"
+          find build/classes -type f | head -20
+          echo "总文件数:"
+          find build/classes -type f | wc -l
+
+      - name: 下载精简版 JRE (Linux)
+        run: |
+          mkdir -p jre-linux
+          curl -L -o jre-linux.zip https://github.com/IIIIIllllIIIIIlllll/Mini-JRE/releases/download/v1.0.0/mini-jre-26.0.1-linux-x64.zip
+          unzip -qo jre-linux.zip -d jre-linux
+          JRE_NAME=$(ls jre-linux | head -1)
+          mv jre-linux/$JRE_NAME jre-linux/jre
+          chmod +x jre-linux/jre/bin/java
+          find jre-linux/jre -name jspawnhelper -exec chmod 755 {} \;
+          rm jre-linux.zip
+          echo "Linux JRE 下载完成"
+
+      - name: 下载精简版 JRE (Windows)
+        run: |
+          mkdir -p jre-win
+          curl -L -o jre-win.zip https://github.com/IIIIIllllIIIIIlllll/Mini-JRE/releases/download/v1.0.0/mini-jre-26.0.1-win-x64.zip
+          unzip -qo jre-win.zip -d jre-win
+          JRE_NAME=$(ls jre-win | head -1)
+          mv jre-win/$JRE_NAME jre-win/jre
+          rm jre-win.zip
+          echo "Windows JRE 下载完成"
+
+      - name: 安装 MinGW-w64 交叉编译工具
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mingw-w64
+
+      - name: 编译启动器 (Linux)
+        run: |
+          cmake -S launcher -B launcher/build-linux -DCMAKE_BUILD_TYPE=Release \
+            -DAPP_VERSION="${APP_VERSION}"
+          cmake --build launcher/build-linux --config Release
+
+      - name: 编译启动器 (Windows)
+        run: |
+          cmake -S launcher -B launcher/build-win \
+            -DCMAKE_SYSTEM_NAME=Windows \
+            -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
+            -DCMAKE_RC_COMPILER=x86_64-w64-mingw32-windres \
+            -DAPP_VERSION="${APP_VERSION}"
+          cmake --build launcher/build-win --config Release
+
+      - name: 生成启动器配置
+        run: |
+          cat > launcher.conf.linux << 'EOF'
+          ##MAINCLASS=org.mark.audiocpp.hub.AudioHubServer
+          -Djava.class.path=./classes:./lib/gson-2.8.9.jar:./lib/netty-all-4.1.35.Final.jar:./lib/log4j-api-2.22.1.jar:./lib/log4j-core-2.22.1.jar:./lib/log4j-slf4j2-impl-2.22.1.jar:./lib/slf4j-api-2.0.9.jar
+          -Xms128m
+          -Xmx128m
+          -XX:MaxDirectMemorySize=128m
+          EOF
+          cat > launcher.conf.win << 'EOF'
+          ##MAINCLASS=org.mark.audiocpp.hub.AudioHubServer
+          -Djava.class.path=./classes;./lib/gson-2.8.9.jar;./lib/netty-all-4.1.35.Final.jar;./lib/log4j-api-2.22.1.jar;./lib/log4j-core-2.22.1.jar;./lib/log4j-slf4j2-impl-2.22.1.jar;./lib/slf4j-api-2.0.9.jar
+          -Xms128m
+          -Xmx128m
+          -XX:MaxDirectMemorySize=128m
+          EOF
+
+      - name: 定位并收集启动器产物
+        run: |
+          LINUX_BIN=$(find launcher/build-linux -name audio.cpp-hub -type f | head -1)
+          WIN_BIN=$(find launcher/build-win -name audio.cpp-hub.exe -type f | head -1)
+          cp "$LINUX_BIN" launcher/audio.cpp-hub
+          cp "$WIN_BIN"   launcher/audio.cpp-hub.exe
+          echo "Linux launcher: $LINUX_BIN -> launcher/audio.cpp-hub"
+          echo "Windows launcher: $WIN_BIN -> launcher/audio.cpp-hub.exe"
+
+      - name: 创建启动脚本 (Linux, 内置 JRE)
+        run: |
+          cat > build/run.sh << 'EOF'
+          #!/bin/bash
+          cd "$(dirname "$0")"
+          chmod +x ./jre/bin/java
+          find ./jre -name jspawnhelper -exec chmod 755 {} \; 2>/dev/null || true
+
+          # ============================================================
+          # JVM 内存参数说明 / JVM Memory Configuration
+          # ============================================================
+          # 本应用是轻量级 HTTP 服务器，默认分配 128MB 内存。
+          # 语音模型由外部 audio.cpp 进程加载，不占用此 JVM 内存。
+          # 通常不需要调整。仅在遇到 OutOfMemoryError 时才考虑增加。
+          #
+          # This is a lightweight HTTP server with 128MB default memory.
+          # Voice models are loaded by external audio.cpp processes, not this JVM.
+          # Normally no adjustment needed. Only increase if you encounter
+          # OutOfMemoryError (e.g. many concurrent connections or large uploads).
+          # ============================================================
+          ./jre/bin/java -Xms128m -Xmx128m -XX:MaxDirectMemorySize=128m -classpath "./classes:./lib/*" org.mark.audiocpp.hub.AudioHubServer "$@"
+          EOF
+          chmod +x build/run.sh
+
+      - name: 创建启动脚本 (Windows, 内置 JRE)
+        run: |
+          cat > build/run.bat << 'EOF'
+          @echo off
+          cd /d "%~dp0"
+
+          rem ============================================================
+          rem JVM 内存参数说明 / JVM Memory Configuration
+          rem ============================================================
+          rem 本应用是轻量级 HTTP 服务器，默认分配 128MB 内存。
+          rem 语音模型由外部 audio.cpp 进程加载，不占用此 JVM 内存。
+          rem 通常不需要调整。仅在遇到 OutOfMemoryError 时才考虑增加。
+          rem
+          rem This is a lightweight HTTP server with 128MB default memory.
+          rem Voice models are loaded by external audio.cpp processes, not this JVM.
+          rem Normally no adjustment needed. Only increase if you encounter
+          rem OutOfMemoryError (e.g. many concurrent connections or large uploads).
+          rem ============================================================
+          start "" jre\bin\javaw.exe -Xms128m -Xmx128m -XX:MaxDirectMemorySize=128m -classpath "./classes;./lib/*" org.mark.audiocpp.hub.AudioHubServer %*
+          EOF
+
+      - name: 创建启动脚本 (平台无关, 使用系统 Java)
+        run: |
+          cp -r build build-standalone
+          cat > build-standalone/run.sh << 'EOF'
+          #!/bin/bash
+          cd "$(dirname "$0")"
+
+          # ============================================================
+          # JVM 内存参数说明 / JVM Memory Configuration
+          # ============================================================
+          # 本应用是轻量级 HTTP 服务器，默认分配 128MB 内存。
+          # 语音模型由外部 audio.cpp 进程加载，不占用此 JVM 内存。
+          # 通常不需要调整。仅在遇到 OutOfMemoryError 时才考虑增加。
+          #
+          # This is a lightweight HTTP server with 128MB default memory.
+          # Voice models are loaded by external audio.cpp processes, not this JVM.
+          # Normally no adjustment needed. Only increase if you encounter
+          # OutOfMemoryError (e.g. many concurrent connections or large uploads).
+          # ============================================================
+          java -Xms128m -Xmx128m -XX:MaxDirectMemorySize=128m -classpath "./classes:./lib/*" org.mark.audiocpp.hub.AudioHubServer "$@"
+          EOF
+          chmod +x build-standalone/run.sh
+          cat > build-standalone/run.bat << 'EOF'
+          @echo off
+          cd /d "%~dp0"
+
+          rem ============================================================
+          rem JVM 内存参数说明 / JVM Memory Configuration
+          rem ============================================================
+          rem 本应用是轻量级 HTTP 服务器，默认分配 128MB 内存。
+          rem 语音模型由外部 audio.cpp 进程加载，不占用此 JVM 内存。
+          rem 通常不需要调整。仅在遇到 OutOfMemoryError 时才考虑增加。
+          rem
+          rem This is a lightweight HTTP server with 128MB default memory.
+          rem Voice models are loaded by external audio.cpp processes, not this JVM.
+          rem Normally no adjustment needed. Only increase if you encounter
+          rem OutOfMemoryError (e.g. many concurrent connections or large uploads).
+          rem ============================================================
+          start "" javaw.exe -Xms128m -Xmx128m -XX:MaxDirectMemorySize=128m -classpath "./classes;./lib/*" org.mark.audiocpp.hub.AudioHubServer %*
+          EOF
+
+      - name: 复制文档到 build 目录
+        run: |
+          if [ -f README.md ]; then
+            cp README.md build/
+            cp README.md build-standalone/
+          fi
+          if [ -d "docs" ]; then
+            cp -r docs build/
+            cp -r docs build-standalone/
+            echo "已复制 docs 目录"
+          fi
+
+      - name: 打包
+        id: package
+        run: |
+          mkdir -p dist
+          make_zip() {
+            local work_dir="$1"
+            local root_name="$2"
+            local zip_name="$3"
+            mv "$work_dir" "$root_name"
+            zip -r -9 -X "dist/$zip_name" "$root_name"
+          }
+          cp -r build-standalone build-pkg
+          mkdir -p build-pkg/audiocpp
+          make_zip "build-pkg" "audio.cpp-hub-${VERSION}" "audio.cpp-hub-${VERSION}.zip"
+          cp -r build build-linux-pkg
+          cp -r jre-linux/jre build-linux-pkg/jre
+          mkdir -p build-linux-pkg/audiocpp
+          cp launcher/audio.cpp-hub build-linux-pkg/
+          cp launcher.conf.linux build-linux-pkg/launcher.conf
+          chmod +x build-linux-pkg/audio.cpp-hub
+          make_zip "build-linux-pkg" "audio.cpp-hub-${VERSION}-linux" "audio.cpp-hub-${VERSION}-linux.zip"
+          cp -r build build-win-pkg
+          cp -r jre-win/jre build-win-pkg/jre
+          mkdir -p build-win-pkg/audiocpp
+          cp launcher/audio.cpp-hub.exe build-win-pkg/
+          cp launcher.conf.win build-win-pkg/launcher.conf
+          make_zip "build-win-pkg" "audio.cpp-hub-${VERSION}-windows" "audio.cpp-hub-${VERSION}-windows.zip"
+
+      - name: 生成 Release Notes
+        id: release_notes
+        run: |
+          # 获取最新的 commit 信息
+          LATEST_COMMIT=$(git log -1 --pretty=format:"%h - %s (%an, %ar)")
+          COMMIT_MESSAGE=$(git log -1 --pretty=format:"%B")
+
+          # 获取自上一个 tag 以来的所有 commit
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            COMMITS_SINCE_TAG=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+          else
+            COMMITS_SINCE_TAG=$(git log --pretty=format:"- %s (%h)" --no-merges | head -20)
+          fi
+
+          LINUX_ZIPS=$(ls dist/*linux*.zip 2>/dev/null || true)
+          WINDOWS_ZIPS=$(ls dist/*windows*.zip 2>/dev/null || true)
+          BASE_ZIP="dist/audio.cpp-hub-${VERSION}.zip"
+          cat > release_notes.md << 'EOF'
+          ## 🚀 Release Notes
+
+           > ⚠️ **重要提示**：更新前请备份 `data/` 目录（上传的音频和音色库）。
+           >
+           > ⚠️ **IMPORTANT**: Please back up the `data/` directory (uploaded audio and voice library) before upgrading.
+
+           ### 📦 基础版本
+          - 仅包含编译后的 class 文件和依赖库，不包含 JRE 和 audio.cpp
+          - 需要系统已安装 Java 21+ 运行环境
+          - 平台无关，Linux/Windows 通用
+
+          ### 📦 完整版本（内置 JRE）
+          - 编译后的 class 文件
+          - 所有依赖库（lib/*.jar）
+          - 精简版 JRE 26.0.1（内置，无需额外安装 Java 运行环境）
+          - 启动脚本（run.sh / run.bat）
+          - 启动器（audio.cpp-hub / audio.cpp-hub.exe）
+
+          ### 🧩 audio.cpp 说明
+          - 本阶段发布包不包含 audio.cpp 二进制，请自行从 audio.cpp 项目的 Release 下载后放入 `audiocpp/` 目录（最新版本发布页：https://github.com/0xShug0/audio.cpp/releases/latest）
+          EOF
+          echo "" >> release_notes.md
+          echo "### 📦 可用版本" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "**平台无关（需系统 Java 21+）:**" >> release_notes.md
+          if [ -f "$BASE_ZIP" ]; then
+            echo "- \`audio.cpp-hub-${VERSION}.zip\`" >> release_notes.md
+          else
+            echo "- 无" >> release_notes.md
+          fi
+          echo "" >> release_notes.md
+          echo "**Linux:**" >> release_notes.md
+          if [ -n "$LINUX_ZIPS" ]; then
+            while IFS= read -r f; do
+              [ -n "$f" ] && echo "- \`$(basename "$f")\`" >> release_notes.md
+            done <<< "$LINUX_ZIPS"
+          else
+            echo "- 无" >> release_notes.md
+          fi
+          echo "" >> release_notes.md
+          echo "**Windows:**" >> release_notes.md
+          if [ -n "$WINDOWS_ZIPS" ]; then
+            while IFS= read -r f; do
+              [ -n "$f" ] && echo "- \`$(basename "$f")\`" >> release_notes.md
+            done <<< "$WINDOWS_ZIPS"
+          else
+            echo "- 无" >> release_notes.md
+          fi
+          cat >> release_notes.md << 'EOF'
+
+          ### 📝 使用方法
+
+          **Linux:**
+          ```bash
+          unzip <你下载的 linux zip 包>
+          cd <解压后的目录>
+          chmod +x run.sh
+          chmod +x jre/bin/java
+          ./run.sh
+          ```
+
+          **Windows:**
+          ```cmd
+          unzip <你下载的 windows zip 包>
+          cd <解压后的目录>
+          run.bat
+          ```
+
+          **注意：**
+          - **升级前请先备份 `data/` 目录**。
+          - **Back up the `data/` directory before upgrading.**
+          - 本版本已内置精简版 JRE，无需额外安装 Java 环境。
+          - **安全警告：** 本应用为局域网工具，不具备互联网安全防护能力。请勿将服务端口直接暴露到公网。如需远程访问，请使用反向代理 + HTTPS。
+
+          ### ⚠️ JVM 内存配置 / JVM Memory Configuration
+
+          本应用是轻量级 HTTP 服务器，默认分配 128MB 内存。
+          语音模型由外部 audio.cpp 进程加载，不占用此 JVM 内存。
+
+          This is a lightweight HTTP server with 128MB default memory.
+          Voice models are loaded by external audio.cpp processes, not this JVM.
+          ---
+          ### 📌 最新提交
+          EOF
+
+          echo "$LATEST_COMMIT" >> release_notes.md
+          echo "" >> release_notes.md
+
+          # 添加提交详情
+          if [ -n "$COMMITS_SINCE_TAG" ]; then
+            echo "### 📋 自上次发布以来的变更" >> release_notes.md
+            echo "" >> release_notes.md
+            echo "$COMMITS_SINCE_TAG" >> release_notes.md
+          fi
+
+          echo "" >> release_notes.md
+          echo "---" >> release_notes.md
+          echo "*构建时间: $(date -u +"%Y-%m-%d %H:%M:%S UTC")*" >> release_notes.md
+
+          # 输出内容供调试
+          echo "生成的 Release Notes:"
+          cat release_notes.md
+
+      - name: 创建 Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/*.zip
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: audio.cpp-hub-${{ steps.get_version.outputs.version }}
+          path: |
+            dist/*.zip
+            release_notes.md
+          retention-days: 30
