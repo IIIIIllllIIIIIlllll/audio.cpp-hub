@@ -707,9 +707,9 @@ footer { padding: 4px 24px 18px; }
 .fb-hidden-toggle input { margin-top: 0; }
 .fb-subbar .fb-mkdir { flex: none; white-space: nowrap; padding: 6px 12px; font-size: 12.5px; }
 .fb-list {
-  flex: 1;
-  min-height: 200px;
-  max-height: 46vh;
+  flex: none;
+  height: 46vh;
+  min-height: 320px;
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 10px;

@@ -272,12 +272,9 @@ window.FileBrowser = (() => {
   }
 
   function onRowClick(e) {
+    // 统一交互：单击 = 选中（文件/文件夹两种模式一致），双击 = 进入文件夹
     if (e.dir) {
-      if (opts.mode === "dir") {
-        select(e);
-      } else {
-        navigate(e.path);
-      }
+      select(e);
     } else if (opts.mode !== "dir") {
       select(e);
     }

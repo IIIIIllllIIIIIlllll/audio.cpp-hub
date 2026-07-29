@@ -87,16 +87,12 @@ async function loadModels() {
   renderWorkspace();
 }
 
-/* 已配置 = 有使用记录（Profile）：权重目录有效，且对应的 audiocpp_server 可执行文件有效 */
+/* 已配置 = 任一使用记录（Profile）的权重有效，且当前存在至少一个可用的 audiocpp_server。
+   注意：Profile 关联的 executableId 可能已失效（可执行文件被删除/重加），
+   但启动弹窗可改选其他可执行文件，所以不把失效的关联当作"未配置"。 */
 function modelConfigured(m) {
-  const p = profiles.find(x => x.modelId === m.id && x.weightsPath);
-  if (!p || p.weightsExists === false) return false;
-  if (p.executableId) {
-    const ex = executables.find(e => e.id === p.executableId);
-    return !!ex && ex.exists;
-  }
-  // 老配置可能没有 executableId：任意可执行文件有效即可
-  return executables.some(e => e.exists);
+  const weightsOk = profiles.some(x => x.modelId === m.id && x.weightsPath && x.weightsExists !== false);
+  return weightsOk && executables.some(e => e.exists);
 }
 
 function renderModelList() {
