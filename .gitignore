@@ -1,5 +1,7 @@
 /target/
+/build/
 /logs/
 /run/
 /data/
+/ssl/
 /launcher/build/

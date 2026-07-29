@@ -141,7 +141,7 @@ main {
   padding: 20px 24px;
 }
 #left {
-  flex: 0 0 340px;
+  flex: 0 0 296px;
   min-height: 0;
   overflow-y: auto;
   /* 左/上各留 2px，避免选中卡片的外扩 box-shadow 和 hover 上移被 overflow 裁剪 */
@@ -151,11 +151,39 @@ main {
 #workspace { max-width: 860px; margin: 0 auto; }
 footer { flex: none; }
 
+/* 移动端菜单按钮：桌面端隐藏 */
+#menu-toggle { display: none; flex: none; }
+
 @media (max-width: 1100px) {
   main { flex-direction: column; overflow-y: auto; }
-  #left { flex: none; width: 100%; overflow: visible; }
   #right { flex: none; overflow: visible; }
   #workspace { max-width: none; }
+  #menu-toggle { display: flex; }
+  /* 左侧模型/实例列表：默认隐藏的抽屉式菜单，点击 ☰ 弹出 */
+  #left {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 250;
+    width: min(320px, 85vw);
+    flex: none;
+    padding: 16px 12px;
+    overflow-y: auto;
+    background: var(--bg-elevated);
+    border-right: 1px solid var(--border);
+    box-shadow: var(--shadow-hover);
+    transform: translateX(-105%);
+    transition: transform 0.25s ease;
+  }
+  #left.open { transform: translateX(0); }
+  .drawer-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 240;
+    background: rgba(0, 0, 0, 0.45);
+    animation: fade-in 0.2s ease;
+  }
 }
 
 /* ---------- 卡片 ---------- */
@@ -179,6 +207,21 @@ footer { flex: none; }
 .card-actions { margin-top: 10px; display: flex; gap: 8px; }
 .tts-card { padding: 20px 22px; }
 .tts-card h2 { margin-top: 0; }
+
+/* 模型列表：紧凑展示（标题 + 家族徽标一行，描述单行省略） */
+#model-list { gap: 6px; }
+#model-list .card { padding: 8px 12px; border-radius: 10px; }
+#model-list .card-title { font-size: 13px; gap: 6px; }
+#model-list .card-family { font-size: 11px; margin-top: 1px; }
+#model-list .card-desc {
+  font-size: 12px;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#model-list .group-title { margin: 8px 0 0; }
+#model-list .badge { padding: 1px 8px; font-size: 10.5px; }
 
 /* ---------- 状态徽标 / pill ---------- */
 .badge {
@@ -495,21 +538,15 @@ details summary:hover { text-decoration: underline; }
 /* ---------- 页脚 ---------- */
 footer { padding: 4px 24px 18px; }
 
-/* ---------- 可执行文件区块（左：可滚动列表 / 右：添加表单） ---------- */
-#exec-modal .modal { width: min(860px, 94vw); }
+/* ---------- 可执行文件区块（设置对话框内，上下排列：列表 / 添加表单） ---------- */
 .exec-body {
   display: flex;
-  gap: 22px;
+  flex-direction: column;
+  gap: 8px;
   align-items: stretch;
 }
-#exec-list-section {
-  flex: 1.3;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-#exec-form-section { flex: 1; min-width: 0; }
 .exec-body .exec-section-title { margin-top: 0; }
+#exec-form-section .exec-section-title { margin-top: 14px; }
 .exec-section-title {
   font-size: 13px;
   font-weight: 700;
@@ -518,9 +555,8 @@ footer { padding: 4px 24px 18px; }
   margin: 16px 0 8px;
 }
 .exec-list {
-  flex: 1;
-  min-height: 120px;
-  max-height: 52vh;
+  min-height: 90px;
+  max-height: 26vh;
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -547,9 +583,133 @@ footer { padding: 4px 24px 18px; }
 }
 .card.missing { opacity: 0.55; }
 
+/* ---------- 设置对话框：左侧功能菜单 + 右侧内容面板 ---------- */
+#settings-modal .modal {
+  width: min(1200px, 96vw);
+  height: min(780px, 90vh);
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.settings-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 0;
+}
+.settings-nav {
+  flex: 0 0 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 14px;
+  margin-right: 18px;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+.settings-nav-item {
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 14px;
+  font-size: 13px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.settings-nav-item:hover { background: var(--input-bg); filter: none; }
+.settings-nav-item.active {
+  background: var(--ring);
+  color: var(--accent);
+  font-weight: 600;
+}
+.settings-content {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* 设置项行：左侧标签 + 说明，右侧控件 */
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--border);
+}
+.settings-row-text { flex: 1; min-width: 0; }
+.settings-row-label { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.settings-row-desc { font-size: 12.5px; color: var(--text-dim); margin-top: 2px; word-break: break-all; }
+.settings-select { flex: 0 0 140px; margin-top: 0; }
+.settings-btn-col { display: flex; flex-direction: column; gap: 8px; flex: none; }
+.settings-btn-col button { white-space: nowrap; font-size: 12.5px; }
+
+/* 开关（switch） */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 42px;
+  height: 24px;
+  flex: none;
+  margin: 0;
+}
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch-slider {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--border);
+  transition: background 0.2s ease;
+  cursor: pointer;
+}
+.switch-slider::before {
+  content: "";
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  left: 3px;
+  top: 3px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  transition: transform 0.2s ease;
+}
+.switch input:checked + .switch-slider { background: var(--accent); }
+.switch input:checked + .switch-slider::before { transform: translateX(18px); }
+
+/* HTTPS 面板表单 */
+#settings-pane-https .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#settings-pane-https .grid .span-all { grid-column: 1 / -1; }
+#https-result { white-space: pre-wrap; word-break: break-all; }
+#https-result:not(:empty) {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--input-bg);
+}
+
 @media (max-width: 720px) {
-  .exec-body { flex-direction: column; }
-  .exec-list { max-height: 30vh; flex: none; }
+  /* 移动端：设置对话框全屏 */
+  #settings-modal .modal {
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    max-height: none;
+    border-radius: 0;
+    border: none;
+  }
+  .settings-body { flex-direction: column; }
+  .settings-nav {
+    flex: none;
+    flex-direction: row;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding: 0 0 10px;
+    margin: 0 0 12px;
+  }
 }
 
 /* ---------- 事件 toast ---------- */

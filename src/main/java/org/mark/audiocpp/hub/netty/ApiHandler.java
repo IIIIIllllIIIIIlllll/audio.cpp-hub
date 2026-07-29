@@ -11,8 +11,10 @@ import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.QueryStringDecoder;
 import io.netty.util.CharsetUtil;
+import org.mark.audiocpp.hub.AudioHubServer;
 import org.mark.audiocpp.hub.audio.AudioStore;
 import org.mark.audiocpp.hub.audio.VoiceLibrary;
+import org.mark.audiocpp.hub.cert.CertManager;
 import org.mark.audiocpp.hub.config.ExecutableRegistry;
 import org.mark.audiocpp.hub.config.ProfileRegistry;
 import org.mark.audiocpp.hub.fs.FileSystemBrowser;
@@ -164,6 +166,14 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
             sendJson(ctx, HttpResponseStatus.OK, fileSystemBrowser.stat(pathParam).toString(), request);
         } else if (method.equals(HttpMethod.POST) && path.equals("/api/fs/mkdir")) {
             handleFsMkdir(ctx, request);
+        } else if (method.equals(HttpMethod.GET) && path.equals("/api/cert/status")) {
+            sendJson(ctx, HttpResponseStatus.OK, Jsons.ok(CertManager.status()), request);
+        } else if (method.equals(HttpMethod.POST) && path.equals("/api/cert/generate")) {
+            handleCertGenerate(ctx, request);
+        } else if (method.equals(HttpMethod.GET) && path.equals("/api/cert/download")) {
+            handleCertDownload(ctx, request, decoder);
+        } else if (method.equals(HttpMethod.POST) && path.equals("/api/https/config")) {
+            handleHttpsConfig(ctx, request);
         } else {
             sendJson(ctx, HttpResponseStatus.NOT_FOUND,
                     Jsons.error("UNKNOWN_API", Map.of("path", path), "unknown api: " + path), request);
@@ -496,6 +506,68 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         } catch (Exception e) {
             sendJson(ctx, HttpResponseStatus.BAD_REQUEST, errorJson(e), request);
         }
+    }
+
+    /** 生成自签 CA + 服务器证书：{"ips"?,"hostnames"?,"validity"?,"password"?,"keysize"?,"cn"?}，重启后生效。 */
+    private void handleCertGenerate(ChannelHandlerContext ctx, FullHttpRequest request) {
+        JsonObject body;
+        try {
+            body = JsonParser.parseString(request.content().toString(CharsetUtil.UTF_8)).getAsJsonObject();
+        } catch (Exception e) {
+            sendJson(ctx, HttpResponseStatus.BAD_REQUEST,
+                    Jsons.error("INVALID_JSON", null, "请求体不是合法 JSON"), request);
+            return;
+        }
+        try {
+            sendJson(ctx, HttpResponseStatus.OK, Jsons.ok(CertManager.generate(body)), request);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            sendJson(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR,
+                    Jsons.error("CERT_GENERATE_FAILED", null, "证书生成被中断"), request);
+        } catch (Exception e) {
+            log.error("证书生成失败", e);
+            sendJson(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, errorJson(e), request);
+        }
+    }
+
+    /** 下载证书文件：?type=ca 下载 CA 根证书，否则下载服务器密钥库。 */
+    private void handleCertDownload(ChannelHandlerContext ctx, FullHttpRequest request,
+                                    QueryStringDecoder decoder) throws Exception {
+        String type = firstParam(decoder, "type");
+        Path filePath;
+        String contentType;
+        if ("ca".equalsIgnoreCase(type)) {
+            filePath = CertManager.caCertPath();
+            contentType = "application/x-x509-ca-cert";
+        } else {
+            filePath = Path.of(AudioHubServer.getHttpsKeystorePath()).toAbsolutePath().normalize();
+            contentType = "application/x-pkcs12";
+        }
+        if (!Files.isRegularFile(filePath)) {
+            sendJson(ctx, HttpResponseStatus.NOT_FOUND,
+                    Jsons.error("CERT_FILE_NOT_FOUND", null, "证书文件不存在"), request);
+            return;
+        }
+        String fileName = filePath.getFileName() == null ? "keystore.p12" : filePath.getFileName().toString();
+        StaticFileHandler.sendBytes(ctx, HttpResponseStatus.OK, contentType, Files.readAllBytes(filePath),
+                HttpVersion.HTTP_1_1, request, "attachment; filename=\"" + fileName + "\"");
+    }
+
+    /** 更新 HTTPS 配置：{"enabled"?,"keystorePath"?,"keystorePassword"?}，重启后生效；返回最新状态。 */
+    private void handleHttpsConfig(ChannelHandlerContext ctx, FullHttpRequest request) {
+        JsonObject body;
+        try {
+            body = JsonParser.parseString(request.content().toString(CharsetUtil.UTF_8)).getAsJsonObject();
+        } catch (Exception e) {
+            sendJson(ctx, HttpResponseStatus.BAD_REQUEST,
+                    Jsons.error("INVALID_JSON", null, "请求体不是合法 JSON"), request);
+            return;
+        }
+        Boolean enabled = body.has("enabled") && body.get("enabled").isJsonPrimitive()
+                ? body.get("enabled").getAsBoolean() : null;
+        AudioHubServer.updateHttpsConfig(enabled, optString(body, "keystorePath"),
+                optString(body, "keystorePassword"));
+        sendJson(ctx, HttpResponseStatus.OK, Jsons.ok(CertManager.status()), request);
     }
 
     /** 异常转错误 JSON：UserException 带 code/params，其余用 message 兜底（无 code）。 */

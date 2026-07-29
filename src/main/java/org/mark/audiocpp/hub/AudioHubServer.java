@@ -1,5 +1,6 @@
 package org.mark.audiocpp.hub;
 
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import io.netty.bootstrap.ServerBootstrap;
@@ -7,10 +8,12 @@ import io.netty.channel.Channel;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.handler.ssl.SslContext;
 import org.mark.audiocpp.hub.config.ExecutableRegistry;
 import org.mark.audiocpp.hub.config.ProfileRegistry;
 import org.mark.audiocpp.hub.instance.InstanceManager;
 import org.mark.audiocpp.hub.netty.HttpServerInitializer;
+import org.mark.audiocpp.hub.netty.HttpsSupport;
 import org.mark.audiocpp.hub.util.Jsons;
 import org.mark.audiocpp.hub.win.AutoStartManager;
 import org.mark.audiocpp.hub.win.WindowsTray;
@@ -41,6 +44,10 @@ public class AudioHubServer {
     private static volatile EventLoopGroup bossGroup;
     private static volatile EventLoopGroup workerGroup;
 
+    private static volatile boolean httpsEnabled = false;
+    private static volatile String httpsKeystorePath = "ssl/keystore.p12";
+    private static volatile String httpsKeystorePassword = "changeit";
+
     public static void main(String[] args) throws Exception {
         HubConfig config = loadConfig();
 
@@ -57,14 +64,19 @@ public class AudioHubServer {
         EventLoopGroup worker = new NioEventLoopGroup();
         bossGroup = boss;
         workerGroup = worker;
+        // HTTPS 启用且证书加载成功时返回非 null，否则按纯 HTTP 启动
+        SslContext sslContext = config.httpsEnabled
+                ? HttpsSupport.buildSslContext(config.httpsKeystorePath, config.httpsKeystorePassword)
+                : null;
         try {
             ServerBootstrap bootstrap = new ServerBootstrap();
             bootstrap.group(boss, worker)
                     .channel(NioServerSocketChannel.class)
-                    .childHandler(new HttpServerInitializer(instanceManager, executableRegistry, profileRegistry));
+                    .childHandler(new HttpServerInitializer(instanceManager, executableRegistry,
+                            profileRegistry, sslContext, config.httpPort));
             Channel channel = bootstrap.bind(config.httpPort).sync().channel();
             serverChannel = channel;
-            log.info("audio.cpp-hub 已启动: http://127.0.0.1:{}", config.httpPort);
+            log.info("audio.cpp-hub 已启动: {}://127.0.0.1:{}", sslContext != null ? "https" : "http", config.httpPort);
             createWindowsSystemTray(config.httpPort);
             channel.closeFuture().sync();
         } finally {
@@ -131,7 +143,7 @@ public class AudioHubServer {
 
         try {
             WindowsTray tray = WindowsTray.getInstance();
-            String host = "http://127.0.0.1:" + httpPort;
+            String host = (httpsEnabled ? "https" : "http") + "://127.0.0.1:" + httpPort;
             tray.addButton(btnOpen, () -> {
                 try {
                     Desktop.getDesktop().browse(new URI(host));
@@ -191,18 +203,75 @@ public class AudioHubServer {
                 JsonObject obj = JsonParser.parseString(text).getAsJsonObject();
                 if (obj.has("httpPort")) config.httpPort = obj.get("httpPort").getAsInt();
                 if (obj.has("instancePortBase")) config.instancePortBase = obj.get("instancePortBase").getAsInt();
+                if (obj.has("https") && obj.get("https").isJsonObject()) {
+                    JsonObject https = obj.getAsJsonObject("https");
+                    if (https.has("enabled")) config.httpsEnabled = https.get("enabled").getAsBoolean();
+                    if (https.has("keystorePath")) config.httpsKeystorePath = https.get("keystorePath").getAsString();
+                    if (https.has("keystorePassword")) config.httpsKeystorePassword = https.get("keystorePassword").getAsString();
+                }
             } catch (Exception e) {
                 log.warn("读取 hub.config.json 失败，使用默认配置: {}", Jsons.summarize(e.getMessage()));
             }
         } else {
             log.info("未找到 hub.config.json，使用默认配置");
         }
+        httpsEnabled = config.httpsEnabled;
+        httpsKeystorePath = config.httpsKeystorePath;
+        httpsKeystorePassword = config.httpsKeystorePassword;
         return config;
+    }
+
+    public static boolean isHttpsEnabled() {
+        return httpsEnabled;
+    }
+
+    public static String getHttpsKeystorePath() {
+        return httpsKeystorePath;
+    }
+
+    public static String getHttpsKeystorePassword() {
+        return httpsKeystorePassword;
+    }
+
+    /**
+     * 更新 HTTPS 配置并写回 hub.config.json（保留文件中的其他键）。传 null 的字段保持不变。
+     * 注意：SslContext 在启动时构建，修改配置需重启程序后生效。
+     */
+    public static synchronized void updateHttpsConfig(Boolean enabled, String keystorePath, String password) {
+        if (enabled != null) {
+            httpsEnabled = enabled;
+        }
+        if (keystorePath != null) {
+            httpsKeystorePath = keystorePath;
+        }
+        if (password != null) {
+            httpsKeystorePassword = password;
+        }
+        try {
+            Path path = Path.of("hub.config.json");
+            JsonObject root = new JsonObject();
+            if (Files.isRegularFile(path)) {
+                root = JsonParser.parseString(Files.readString(path, StandardCharsets.UTF_8)).getAsJsonObject();
+            }
+            JsonObject https = root.has("https") && root.get("https").isJsonObject()
+                    ? root.getAsJsonObject("https") : new JsonObject();
+            https.addProperty("enabled", httpsEnabled);
+            https.addProperty("keystorePath", httpsKeystorePath);
+            https.addProperty("keystorePassword", httpsKeystorePassword);
+            root.add("https", https);
+            Files.writeString(path, new GsonBuilder().setPrettyPrinting().create().toJson(root),
+                    StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            log.warn("写回 hub.config.json 的 https 配置失败: {}", Jsons.summarize(e.getMessage()));
+        }
     }
 
     /** hub 自身配置。 */
     public static class HubConfig {
         public int httpPort = 8080;
         public int instancePortBase = 18080;
+        public boolean httpsEnabled = false;
+        public String httpsKeystorePath = "ssl/keystore.p12";
+        public String httpsKeystorePassword = "changeit";
     }
 }

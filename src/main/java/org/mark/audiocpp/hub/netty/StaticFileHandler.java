@@ -69,12 +69,20 @@ public class StaticFileHandler extends SimpleChannelInboundHandler<FullHttpReque
 
     static void sendBytes(ChannelHandlerContext ctx, HttpResponseStatus status, String contentType,
                           byte[] body, HttpVersion version, FullHttpRequest request) {
+        sendBytes(ctx, status, contentType, body, version, request, null);
+    }
+
+    static void sendBytes(ChannelHandlerContext ctx, HttpResponseStatus status, String contentType,
+                          byte[] body, HttpVersion version, FullHttpRequest request, String contentDisposition) {
         ByteBuf buf = Unpooled.wrappedBuffer(body);
         FullHttpResponse response = new DefaultFullHttpResponse(version, status, buf);
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, contentType);
         response.headers().set(HttpHeaderNames.CONTENT_LENGTH, body.length);
         response.headers().set(HttpHeaderNames.CACHE_CONTROL, "no-cache");
         response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+        if (contentDisposition != null) {
+            response.headers().set(HttpHeaderNames.CONTENT_DISPOSITION, contentDisposition);
+        }
         if (io.netty.handler.codec.http.HttpUtil.isKeepAlive(request)) {
             response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE);
             ctx.writeAndFlush(response);

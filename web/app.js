@@ -70,9 +70,25 @@ function rerenderAll() {
   renderInstanceList(); updateInstanceBar();
   buildEmotionSliders();
   if (selectedModel()) renderWorkspace();
+  if (!settingsModal.classList.contains("hidden")) {
+    syncGeneralPane();
+    if (lastCertStatus) renderCertStatus(lastCertStatus);
+  }
   (window.__audioPickers || []).forEach(p => p.refreshLabels && p.refreshLabels());
   if (window.FileBrowser && FileBrowser.relocalize) FileBrowser.relocalize();
 }
+
+/* ---------- 移动端抽屉菜单（模型/实例列表） ---------- */
+function openDrawer() {
+  $("left").classList.add("open");
+  $("drawer-overlay").classList.remove("hidden");
+}
+function closeDrawer() {
+  $("left").classList.remove("open");
+  $("drawer-overlay").classList.add("hidden");
+}
+$("menu-toggle").onclick = openDrawer;
+$("drawer-overlay").onclick = closeDrawer;
 
 /* ---------- 模型列表（按 category 分组） ---------- */
 async function loadModels() {
@@ -120,6 +136,7 @@ function renderModelList() {
         restoreWeightsPath();
         refreshInstances();
         renderWorkspace();
+        closeDrawer();
       };
       list.appendChild(card);
     }
@@ -131,19 +148,160 @@ function updateQuickLaunchTitle() {
   $("quick-launch-model").textContent = m ? I18N.pick(m, "displayName") : "";
 }
 
-/* ---------- 可执行文件（设置 modal） ---------- */
-const execModal = $("exec-modal");
-function openExecModal() {
-  execModal.classList.remove("hidden");
+/* ---------- 设置对话框（左侧功能菜单 + 右侧内容面板） ---------- */
+const settingsModal = $("settings-modal");
+let settingsSection = "general";
+let lastCertStatus = null;
+
+function openSettingsModal(section) {
+  settingsSection = section || settingsSection || "general";
+  activateSettingsSection(settingsSection);
+  syncGeneralPane();
+  settingsModal.classList.remove("hidden");
   loadExecutables();
 }
-function closeExecModal() {
-  execModal.classList.add("hidden");
+function closeSettingsModal() {
+  settingsModal.classList.add("hidden");
 }
-$("settings-btn").onclick = openExecModal;
-$("exec-goto-btn").onclick = openExecModal;
-$("exec-modal-close").onclick = closeExecModal;
-execModal.onclick = (e) => { if (e.target === execModal) closeExecModal(); };
+function activateSettingsSection(section) {
+  settingsSection = section;
+  document.querySelectorAll(".settings-nav-item").forEach(b =>
+    b.classList.toggle("active", b.dataset.section === section));
+  document.querySelectorAll(".settings-pane").forEach(p => p.classList.add("hidden"));
+  $("settings-pane-" + section).classList.remove("hidden");
+  if (section === "https") loadCertStatus();
+}
+document.querySelectorAll(".settings-nav-item").forEach(btn => {
+  btn.onclick = () => activateSettingsSection(btn.dataset.section);
+});
+$("settings-btn").onclick = () => openSettingsModal("general");
+$("exec-goto-btn").onclick = () => openSettingsModal("executables");
+$("settings-modal-close").onclick = closeSettingsModal;
+settingsModal.onclick = (e) => { if (e.target === settingsModal) closeSettingsModal(); };
+
+/* 通用面板：界面语言 / 主题（与页头开关同一状态源） */
+function syncGeneralPane() {
+  $("ui-language").value = I18N.lang();
+  $("ui-theme").value = document.documentElement.dataset.theme;
+}
+$("ui-language").onchange = (e) => I18N.setLang(e.target.value);
+$("ui-theme").onchange = (e) => {
+  const next = e.target.value === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem("hub-theme", next);
+  applyThemeIcon();
+  window.dispatchEvent(new Event("themechange"));
+};
+
+/* ---------- HTTPS 证书面板 ---------- */
+async function loadCertStatus() {
+  try {
+    const res = await fetch("/api/cert/status");
+    const json = await res.json();
+    if (json && json.data) renderCertStatus(json.data);
+  } catch (e) { /* 状态拉取失败不影响面板其他操作 */ }
+}
+
+function renderCertStatus(data) {
+  lastCertStatus = data;
+  $("https-enabled").checked = !!data.enabled;
+  const badge = $("https-status-badge");
+  if (data.exists) {
+    badge.textContent = t("https.certOk");
+    badge.className = "badge ready";
+  } else {
+    badge.textContent = t("https.certMissing");
+    badge.className = "badge stopped";
+  }
+  $("https-status-text").textContent = t("https.statusLine", {
+    path: data.path,
+    ca: data.caCertExists ? t("https.caExists") : t("https.caMissing")
+  });
+}
+
+$("https-enabled").onchange = async (e) => {
+  const enabled = e.target.checked;
+  try {
+    const res = await fetch("/api/https/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled })
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(I18N.errText(text));
+    renderCertStatus(JSON.parse(text).data);
+    showToast("info", t("https.configSaved"));
+  } catch (err) {
+    e.target.checked = !enabled;
+    showToast("error", t("https.saveFailed") + t("common.colon") + err.message);
+  }
+};
+
+async function downloadCert(url, fallbackName) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      const text = await res.text();
+      showToast("error", t("https.downloadFailed") + t("common.colon") + I18N.errText(text));
+      return;
+    }
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    const dispo = res.headers.get("Content-Disposition") || "";
+    const m = dispo.match(/filename="([^"]+)"/);
+    a.download = m ? m[1] : fallbackName;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  } catch (e) {
+    showToast("error", t("https.downloadFailed") + t("common.colon") + e.message);
+  }
+}
+$("https-download-ca").onclick = () => downloadCert("/api/cert/download?type=ca", "ca-cert.cer");
+$("https-download-keystore").onclick = () => downloadCert("/api/cert/download", "keystore.p12");
+
+$("https-generate-btn").onclick = async () => {
+  const msg = $("https-msg");
+  const result = $("https-result");
+  msg.textContent = "";
+  result.textContent = "";
+  const body = {
+    hostnames: $("https-hostnames").value.split("\n").map(s => s.trim()).filter(Boolean),
+    ips: $("https-ips").value.split("\n").map(s => s.trim()).filter(Boolean),
+    validity: parseInt($("https-validity").value, 10) || 3650,
+    keysize: parseInt($("https-keysize").value, 10) || 2048
+  };
+  const password = $("https-password").value.trim();
+  if (password) body.password = password;
+  const btn = $("https-generate-btn");
+  btn.disabled = true;
+  btn.textContent = t("https.generating");
+  const start = showBusy(t("https.busy"));
+  try {
+    const res = await fetch("/api/cert/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      msg.textContent = t("https.generateFailed") + t("common.colon") + I18N.errText(text);
+      return;
+    }
+    const data = JSON.parse(text).data;
+    result.textContent = t("https.generateDone", {
+      path: data.path, ca: data.caCertPath, password: data.password, expire: data.expireDate
+    });
+    loadCertStatus();
+  } catch (e) {
+    msg.textContent = t("https.generateFailed") + t("common.colon") + e.message;
+  } finally {
+    hideBusy();
+    btn.disabled = false;
+    btn.textContent = t("https.generate");
+  }
+};
+
 
 /* ---------- 启动模型 modal ---------- */
 const launchModal = $("launch-modal");
@@ -202,8 +360,9 @@ $("exec-browse-btn").onclick = async () => {
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
-    closeExecModal();
+    closeSettingsModal();
     closeLaunchModal();
+    closeDrawer();
   }
 });
 

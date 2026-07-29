@@ -11,6 +11,7 @@
 <body>
   <header>
     <div class="brand">
+      <button id="menu-toggle" class="theme-btn" data-i18n-title="header.menuTitle" title="模型与实例菜单">☰</button>
       <span class="logo">audio.cpp-hub</span>
       <span class="subtitle" data-i18n="header.subtitle">audiocpp_server 进程管理 &amp; 音频工作台</span>
     </div>
@@ -140,6 +141,8 @@
 
   <footer class="hint" data-i18n="footer.hint">提示：音频可上传 / 录制 / 从音色库选择，也可填写运行 hub 的机器上的本机路径。</footer>
   <div id="toast-root"></div>
+  <!-- 移动端抽屉遮罩：点击收起左侧模型/实例菜单 -->
+  <div id="drawer-overlay" class="drawer-overlay hidden"></div>
 
   <!-- 启动模型 modal -->
   <div id="launch-modal" class="modal-overlay hidden">
@@ -194,32 +197,115 @@
     </div>
   </div>
 
-  <!-- 可执行文件管理 modal -->
-  <div id="exec-modal" class="modal-overlay hidden">
-    <div class="modal">
+  <!-- 设置 modal：左侧功能菜单 + 右侧内容面板 -->
+  <div id="settings-modal" class="modal-overlay hidden">
+    <div class="modal settings-modal">
       <div class="modal-header">
-        <span class="modal-title" data-i18n="exec.title">可执行文件管理</span>
-        <button id="exec-modal-close" class="modal-close">×</button>
+        <span class="modal-title" data-i18n="settings.title">设置</span>
+        <button id="settings-modal-close" class="modal-close">×</button>
       </div>
-      <div class="exec-body">
-        <div id="exec-list-section">
-          <div class="exec-section-title" data-i18n="exec.listTitle">已添加的可执行文件</div>
-          <div id="exec-list" class="exec-list"></div>
-        </div>
-        <div id="exec-form-section">
-          <div class="exec-section-title" data-i18n="exec.addTitle">添加可执行文件</div>
-          <div class="exec-add">
-            <label><span data-i18n="exec.name">名称</span><input id="exec-name" type="text" data-i18n-placeholder="exec.namePlaceholder" placeholder="例如 CUDA 版"></label>
-            <label><span data-i18n="exec.path">路径</span>
-              <div class="input-btn-row">
-                <input id="exec-path" type="text" data-i18n-placeholder="exec.pathPlaceholder" placeholder="可执行文件路径，或其所在目录">
-                <button id="exec-browse-btn" type="button" data-i18n="launch.browse">浏览</button>
+      <div class="settings-body">
+        <nav class="settings-nav">
+          <button class="settings-nav-item active" data-section="general" data-i18n="settings.nav.general">通用</button>
+          <button class="settings-nav-item" data-section="executables" data-i18n="settings.nav.executables">可执行文件</button>
+          <button class="settings-nav-item" data-section="https" data-i18n="settings.nav.https">HTTPS 证书</button>
+        </nav>
+        <div class="settings-content">
+
+          <!-- 通用 -->
+          <section id="settings-pane-general" class="settings-pane">
+            <div class="settings-row">
+              <div class="settings-row-text">
+                <div class="settings-row-label" data-i18n="settings.general.language">界面语言</div>
+                <div class="settings-row-desc" data-i18n="settings.general.languageDesc">切换界面显示语言，立即生效</div>
               </div>
-            </label>
-            <label><span data-i18n="exec.note">备注（可选）</span><input id="exec-note" type="text"></label>
-            <button id="exec-add-btn" class="btn" data-i18n="exec.add">添加</button>
-            <div id="exec-msg" class="msg"></div>
-          </div>
+              <select id="ui-language" class="settings-select">
+                <option value="zh">中文</option>
+                <option value="en">English</option>
+              </select>
+            </div>
+            <div class="settings-row">
+              <div class="settings-row-text">
+                <div class="settings-row-label" data-i18n="settings.general.theme">界面主题</div>
+                <div class="settings-row-desc" data-i18n="settings.general.themeDesc">切换深色 / 浅色外观，立即生效</div>
+              </div>
+              <select id="ui-theme" class="settings-select">
+                <option value="dark" data-i18n="settings.theme.dark">深色</option>
+                <option value="light" data-i18n="settings.theme.light">浅色</option>
+              </select>
+            </div>
+          </section>
+
+          <!-- 可执行文件 -->
+          <section id="settings-pane-executables" class="settings-pane hidden">
+            <div class="exec-body">
+              <div id="exec-list-section">
+                <div class="exec-section-title" data-i18n="exec.listTitle">已添加的可执行文件</div>
+                <div id="exec-list" class="exec-list"></div>
+              </div>
+              <div id="exec-form-section">
+                <div class="exec-section-title" data-i18n="exec.addTitle">添加可执行文件</div>
+                <div class="exec-add">
+                  <label><span data-i18n="exec.name">名称</span><input id="exec-name" type="text" data-i18n-placeholder="exec.namePlaceholder" placeholder="例如 CUDA 版"></label>
+                  <label><span data-i18n="exec.path">路径</span>
+                    <div class="input-btn-row">
+                      <input id="exec-path" type="text" data-i18n-placeholder="exec.pathPlaceholder" placeholder="可执行文件路径，或其所在目录">
+                      <button id="exec-browse-btn" type="button" data-i18n="launch.browse">浏览</button>
+                    </div>
+                  </label>
+                  <label><span data-i18n="exec.note">备注（可选）</span><input id="exec-note" type="text"></label>
+                  <button id="exec-add-btn" class="btn" data-i18n="exec.add">添加</button>
+                  <div id="exec-msg" class="msg"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- HTTPS 证书 -->
+          <section id="settings-pane-https" class="settings-pane hidden">
+            <div class="settings-row">
+              <div class="settings-row-text">
+                <div class="settings-row-label" data-i18n="https.enableLabel">启用 HTTPS</div>
+                <div class="settings-row-desc" data-i18n="https.enableDesc">同一端口提供 HTTPS，纯 HTTP 请求自动跳转；修改后需重启程序生效</div>
+              </div>
+              <label class="switch"><input type="checkbox" id="https-enabled"><span class="switch-slider"></span></label>
+            </div>
+            <div class="settings-row">
+              <div class="settings-row-text">
+                <div class="settings-row-label" data-i18n="https.statusTitle">证书状态</div>
+                <div class="settings-row-desc" id="https-status-text">—</div>
+              </div>
+              <span id="https-status-badge" class="badge stopped">—</span>
+            </div>
+            <div class="settings-row">
+              <div class="settings-row-text">
+                <div class="settings-row-label" data-i18n="https.downloadTitle">证书下载</div>
+                <div class="settings-row-desc" data-i18n="https.downloadDesc">CA 根证书需安装到客户端的受信任根证书颁发机构，浏览器才不会告警</div>
+              </div>
+              <div class="settings-btn-col">
+                <button id="https-download-ca" type="button" data-i18n="https.downloadCa">下载 CA 根证书</button>
+                <button id="https-download-keystore" type="button" data-i18n="https.downloadKeystore">下载密钥库</button>
+              </div>
+            </div>
+            <div class="exec-section-title" data-i18n="https.generateTitle">生成自签证书</div>
+            <div class="hint" data-i18n="https.generateDesc">基于 JDK 自带 keytool 生成自签 CA 与服务器证书；生成后需重启程序。主机名与 IP 会写入证书 SAN，供局域网访问使用。</div>
+            <div class="grid">
+              <label class="span-all"><span data-i18n="https.hostnames">主机名（每行一个，可选）</span><textarea id="https-hostnames" rows="2" placeholder="my-pc&#10;my-pc.local"></textarea></label>
+              <label class="span-all"><span data-i18n="https.ips">IP 地址（每行一个，可选）</span><textarea id="https-ips" rows="2" placeholder="192.168.1.10"></textarea></label>
+              <label><span data-i18n="https.validity">有效期（天）</span><input id="https-validity" type="number" min="1" value="3650"></label>
+              <label><span data-i18n="https.keysize">密钥长度</span>
+                <select id="https-keysize">
+                  <option value="2048">2048</option>
+                  <option value="4096">4096</option>
+                </select>
+              </label>
+              <label class="span-all"><span data-i18n="https.password">密钥库口令（可选）</span><input id="https-password" type="text" data-i18n-placeholder="https.passwordPlaceholder" placeholder="留空自动生成 16 位随机口令"></label>
+            </div>
+            <button id="https-generate-btn" class="btn" data-i18n="https.generate">生成证书</button>
+            <div id="https-msg" class="msg"></div>
+            <div id="https-result" class="hint"></div>
+          </section>
+
         </div>
       </div>
     </div>

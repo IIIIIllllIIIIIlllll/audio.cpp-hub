@@ -24,7 +24,11 @@ audio.cpp-hub 是 [audio.cpp](https://github.com/0xShug0/audio.cpp) 的 Web 管�
 src/main/java/org/mark/audiocpp/hub/
 ├── AudioHubServer.java   # 入口：Netty 启动、Windows 系统托盘、程序自重启、hub.config.json 加载
 ├── BuildInfo.java        # 版本占位符（{tag}/{version}/{createdTime}），CI 打包时注入，勿手动改值
-├── netty/                # HTTP pipeline：HttpServerInitializer → ApiHandler（/api/* 路由）→ StaticFileHandler（web/ 静态文件）
+├── netty/                # HTTP pipeline：HttpServerInitializer → ApiHandler（/api/* 路由）→ StaticFileHandler（web/ 静态文件）；
+│                         # 启用 HTTPS 时改用 HttpHttpsUnificationHandler 统一端口探测（TLS→HTTPS，纯 HTTP→308 跳转，
+│                         # 见 HttpToHttpsRedirectHandler），SslContext 由 HttpsSupport 从密钥库构建
+├── cert/                 # CertManager：HTTPS 证书状态查询与 keytool 自签 CA + 服务器证书生成（/api/cert/*），
+│                         # 证书放 ssl/（keystore.p12 + ca-cert.cer），生成后需重启生效
 ├── instance/             # InstanceManager（子进程生命周期、端口分配、健康轮询、run/<id> 清理）、ModelInstance、
 │                         # ServerConfigWriter（写实例 server.json）、EventLog（事件，GET /api/events）
 ├── proxy/                # SpeechForwarder：任务请求同步阻塞转发到实例 /v1/tasks/run
@@ -45,7 +49,19 @@ launcher/                 # C 启动器（CMakeLists.txt + launcher.c + launcher
 lib/                      # 本地依赖 jar（pom 与 launcher.conf 都直接引用）
 ```
 
-运行时（相对工作目录）产生的数据，均被 `.gitignore` 排除：`logs/`、`run/<instanceId>/`（server.json + server.log，停止后自动清理）、`data/`（uploads/、voices/、profiles.json）、`executables.json`、`hub.config.json`。
+运行时（相对工作目录）产生的数据，均被 `.gitignore` 排除：`logs/`、`run/<instanceId>/`（server.json + server.log，停止后自动清理）、`data/`（uploads/、voices/、profiles.json）、`ssl/`（HTTPS 证书）、`build/`（javac 输出）、`executables.json`、`hub.config.json`。
+
+## HTTPS
+
+`hub.config.json` 增加 `https` 节即可启用（与 hub 同一端口，协议自动识别）：
+
+```json
+"https": { "enabled": true, "keystorePath": "ssl/keystore.p12", "keystorePassword": "..." }
+```
+
+- 启用后同一端口上 TLS 请求走 HTTPS，纯 HTTP 请求一律 308 跳转到 HTTPS；证书缺失/加载失败自动回退纯 HTTP
+- 证书相关 API：`GET /api/cert/status`、`POST /api/cert/generate`（body 可带 `ips`/`hostnames`/`validity`/`password`/`keysize`/`cn`，基于 JDK 自带 keytool 生成自签 CA + 服务器证书并写回 https 配置）、`GET /api/cert/download?type=ca|keystore`
+- SslContext 仅在启动时构建，生成证书或改配置后需重启程序；托盘"打开首页"按 `https.enabled` 选择协议
 
 ## 构建与运行
 
