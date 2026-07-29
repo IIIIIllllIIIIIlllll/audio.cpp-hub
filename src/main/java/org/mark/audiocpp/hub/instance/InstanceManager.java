@@ -2,6 +2,7 @@ package org.mark.audiocpp.hub.instance;
 
 import org.mark.audiocpp.hub.AudioHubServer;
 import org.mark.audiocpp.hub.util.Jsons;
+import org.mark.audiocpp.hub.util.UserException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -32,6 +33,9 @@ public class InstanceManager {
     private static final int HEALTH_TIMEOUT_SECONDS = 120;
     private static final java.util.regex.Pattern ENV_PLACEHOLDER =
             java.util.regex.Pattern.compile("\\$\\{([A-Za-z_][A-Za-z0-9_]*)\\}");
+    /** 服务名规则：字母数字开头，可含 . _ -，最长 64（要能被 OpenAI 客户端当 model 名用）。 */
+    private static final java.util.regex.Pattern INSTANCE_NAME =
+            java.util.regex.Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,63}");
 
     private final AudioHubServer.HubConfig config;
     private final Map<String, ModelInstance> instances = new ConcurrentHashMap<>();
@@ -51,6 +55,28 @@ public class InstanceManager {
         return instances.get(id);
     }
 
+    /** 按服务名查找 READY 实例（/v1/* 路由用），不存在或未就绪返回 null。 */
+    public ModelInstance findByName(String name) {
+        if (name == null) return null;
+        for (ModelInstance instance : instances.values()) {
+            if (name.equals(instance.getInstanceName()) && instance.getStatus() == ModelInstance.Status.READY) {
+                return instance;
+            }
+        }
+        return null;
+    }
+
+    /** 是否存在该服务名的存活实例（STARTING/READY），用于 /v1/* 区分"未就绪"与"不存在"。 */
+    public ModelInstance findAnyByName(String name) {
+        if (name == null) return null;
+        for (ModelInstance instance : instances.values()) {
+            if (name.equals(instance.getInstanceName())) {
+                return instance;
+            }
+        }
+        return null;
+    }
+
     public EventLog events() {
         return events;
     }
@@ -59,11 +85,27 @@ public class InstanceManager {
      * 启动一个实例，立即返回（STARTING），后台线程轮询健康状态。
      * 进程拉起失败时记事件并抛异常，不会留下僵尸实例。
      * env 为可执行文件条目上配置的环境变量表，注入子进程；值中 ${VAR} 按 hub 进程环境展开。
+     * instanceName 为服务名（/v1/* 路由键，写进 server.json 的 model id），为空默认 modelId；
+     * 与存活实例重名时抛 UserException。
      */
     public ModelInstance start(String modelId, String weightsPath, String backend,
                                Integer device, Integer requestedPort, Integer threads,
                                String executablePath, String executableName, String serverTask,
-                               Map<String, String> env) throws IOException {
+                               Map<String, String> env, String instanceName) throws IOException {
+        if (instanceName == null || instanceName.isBlank()) {
+            instanceName = modelId;
+        }
+        instanceName = instanceName.trim();
+        if (!INSTANCE_NAME.matcher(instanceName).matches()) {
+            throw new UserException("INSTANCE_NAME_INVALID", Map.of("name", instanceName),
+                    "服务名不合法（字母数字开头，可含 . _ -，最长 64）: " + instanceName);
+        }
+        for (ModelInstance existing : instances.values()) {
+            if (existing.getInstanceName().equals(instanceName)) {
+                throw new UserException("INSTANCE_NAME_DUPLICATE", Map.of("name", instanceName),
+                        "服务名已被实例 #" + existing.getId() + " 占用: " + instanceName);
+            }
+        }
         String id = UUID.randomUUID().toString().substring(0, 8);
         MDC.put("modelId", id);
         try {
@@ -71,7 +113,8 @@ public class InstanceManager {
             Path dir = Path.of("run", id);
             Files.createDirectories(dir);
             Path serverJson = dir.resolve("server.json");
-            ServerConfigWriter.write(serverJson, "127.0.0.1", port, backend, device, threads, modelId, weightsPath, serverTask);
+            ServerConfigWriter.write(serverJson, "127.0.0.1", port, backend, device, threads,
+                    instanceName, modelId, weightsPath, serverTask);
 
             Path logFile = dir.resolve("server.log");
             ProcessBuilder pb = new ProcessBuilder(executablePath, "--config", serverJson.toAbsolutePath().toString());
@@ -95,12 +138,12 @@ public class InstanceManager {
                 throw e;
             }
 
-            ModelInstance instance = new ModelInstance(id, modelId, weightsPath, port, backend, device,
+            ModelInstance instance = new ModelInstance(id, instanceName, modelId, weightsPath, port, backend, device,
                     executableName, serverJson);
             instance.setProcess(process);
             instances.put(id, instance);
-            log.info("实例已启动: executable={}, modelId={}, backend={}, device={}, port={}, pid={}",
-                    executableName, modelId, backend, device, port, process.pid());
+            log.info("实例已启动: executable={}, name={}, modelId={}, backend={}, device={}, port={}, pid={}",
+                    executableName, instanceName, modelId, backend, device, port, process.pid());
             events.add("info", "实例 #" + id + " 启动中（" + executableName + "，端口 " + port + "）");
 
             Thread waiter = new Thread(() -> awaitReady(instance), "instance-watch-" + id);

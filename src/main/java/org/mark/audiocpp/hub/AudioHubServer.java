@@ -73,7 +73,7 @@ public class AudioHubServer {
             bootstrap.group(boss, worker)
                     .channel(NioServerSocketChannel.class)
                     .childHandler(new HttpServerInitializer(instanceManager, executableRegistry,
-                            profileRegistry, sslContext, config.httpPort));
+                            profileRegistry, sslContext, config));
             Channel channel = bootstrap.bind(config.httpPort).sync().channel();
             serverChannel = channel;
             log.info("audio.cpp-hub 已启动: {}://127.0.0.1:{}", sslContext != null ? "https" : "http", config.httpPort);
@@ -203,6 +203,7 @@ public class AudioHubServer {
                 JsonObject obj = JsonParser.parseString(text).getAsJsonObject();
                 if (obj.has("httpPort")) config.httpPort = obj.get("httpPort").getAsInt();
                 if (obj.has("instancePortBase")) config.instancePortBase = obj.get("instancePortBase").getAsInt();
+                if (obj.has("proxyMaxBodyBytes")) config.proxyMaxBodyBytes = obj.get("proxyMaxBodyBytes").getAsLong();
                 if (obj.has("https") && obj.get("https").isJsonObject()) {
                     JsonObject https = obj.getAsJsonObject("https");
                     if (https.has("enabled")) config.httpsEnabled = https.get("enabled").getAsBoolean();
@@ -270,6 +271,8 @@ public class AudioHubServer {
     public static class HubConfig {
         public int httpPort = 8080;
         public int instancePortBase = 18080;
+        /** /v1/* 代理请求体落盘上限（默认 1GB），超限返回 413 */
+        public long proxyMaxBodyBytes = 1024L * 1024 * 1024;
         public boolean httpsEnabled = false;
         public String httpsKeystorePath = "ssl/keystore.p12";
         public String httpsKeystorePassword = "changeit";

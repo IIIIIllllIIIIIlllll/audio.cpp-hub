@@ -8,6 +8,8 @@ audio.cpp-hub 是 [audio.cpp](https://github.com/0xShug0/audio.cpp) 的 Web 管�
 - hub 本身默认监听 `httpPort`（`hub.config.json`，本仓库开发副本为 18080，代码内默认 8080）；各模型实例从 `instancePortBase`（本副本 18090）起自动分配端口，绑定 127.0.0.1
 - 模型实例不在 JVM 内运行：hub 为每个实例写 `run/<id>/server.json`，再用 `ProcessBuilder` 拉起外部 `audiocpp_server --config server.json`，stdout/stderr 重定向到 `run/<id>/server.log`，并后台轮询实例的 `/health`（最多 120s）
 - 推理请求转发路径：前端 `POST /api/run/<instanceId>` → `SpeechForwarder` → 实例 `http://127.0.0.1:<port>/v1/tasks/run`，响应 JSON 原样透传
+- OpenAI 兼容代理：`GET /v1/models` 列出全部 READY 实例的服务名；`POST /v1/*`（如 `/v1/audio/speech`）由 `V1ProxyHandler` 接收——请求体分块落盘到 `run/proxy-cache/`（上限 `hub.config.json` 的 `proxyMaxBodyBytes`，默认 1GB），流式扫描提取顶层 `"model"` 后按服务名路由，路径与 body 原样 `ofFile` 转发到实例同名接口，响应分块流式回写；大 base64 全程不进 JVM 堆。错误体为 OpenAI 风格 `{"error":{"message","type"}}`
+- 实例服务名（instanceName）：启动时可显式指定（默认 modelId），是 `/v1/*` 的路由键，也写进实例 server.json 的 model id（实例自校验一致）；全局唯一，重名拒绝启动
 
 ## 技术栈
 
@@ -24,14 +26,17 @@ audio.cpp-hub 是 [audio.cpp](https://github.com/0xShug0/audio.cpp) 的 Web 管�
 src/main/java/org/mark/audiocpp/hub/
 ├── AudioHubServer.java   # 入口：Netty 启动、Windows 系统托盘、程序自重启、hub.config.json 加载
 ├── BuildInfo.java        # 版本占位符（{tag}/{version}/{createdTime}），CI 打包时注入，勿手动改值
-├── netty/                # HTTP pipeline：HttpServerInitializer → ApiHandler（/api/* 路由）→ StaticFileHandler（web/ 静态文件）；
+├── netty/                # HTTP pipeline：HttpServerCodec → V1ProxyHandler（/v1/* 流式代理，aggregator 之前）→
+│                         # HttpObjectAggregator（/api/* 用，64MB）→ ApiHandler（/api/* 路由）→ StaticFileHandler（web/ 静态文件）；
 │                         # 启用 HTTPS 时改用 HttpHttpsUnificationHandler 统一端口探测（TLS→HTTPS，纯 HTTP→308 跳转，
 │                         # 见 HttpToHttpsRedirectHandler），SslContext 由 HttpsSupport 从密钥库构建
 ├── cert/                 # CertManager：HTTPS 证书状态查询与 keytool 自签 CA + 服务器证书生成（/api/cert/*），
 │                         # 证书放 ssl/（keystore.p12 + ca-cert.cer），生成后需重启生效
 ├── instance/             # InstanceManager（子进程生命周期、端口分配、健康轮询、run/<id> 清理）、ModelInstance、
 │                         # ServerConfigWriter（写实例 server.json）、EventLog（事件，GET /api/events）
-├── proxy/                # SpeechForwarder：任务请求同步阻塞转发到实例 /v1/tasks/run
+├── proxy/                # SpeechForwarder（/api/run 任务请求同步阻塞转发到实例 /v1/tasks/run）、
+│                         # V1ProxyHandler（/v1/* 模型路由代理：落盘 + ofFile 转发 + 响应流式回写）、
+│                         # RequestModelExtractor（流式扫描顶层 JSON 提取 "model"，大字段不落内存）
 ├── config/               # ExecutableRegistry（executables.json：audiocpp_server 可执行文件登记，条目可带 env 环境变量表，
 │                         # 拉起子进程时注入，值支持 ${VAR} 占位符按 hub 进程环境展开；支持 PUT /api/executables/<id> 更新）、
 │                         # ProfileRegistry（data/profiles.json：模型启动配置档案）

@@ -9,6 +9,7 @@ public class ModelInstance {
     public enum Status { STARTING, READY }
 
     private final String id;
+    private final String instanceName;
     private final String modelId;
     private final String weightsPath;
     private final int port;
@@ -21,9 +22,10 @@ public class ModelInstance {
     private volatile Status status = Status.STARTING;
     private volatile Process process;
 
-    public ModelInstance(String id, String modelId, String weightsPath, int port,
+    public ModelInstance(String id, String instanceName, String modelId, String weightsPath, int port,
                          String backend, Integer device, String executableName, Path serverJsonPath) {
         this.id = id;
+        this.instanceName = instanceName;
         this.modelId = modelId;
         this.weightsPath = weightsPath;
         this.port = port;
@@ -34,6 +36,8 @@ public class ModelInstance {
     }
 
     public String getId() { return id; }
+    /** 服务名：/v1/* 路由键，同时是实例 server.json 里的 model id，全局唯一。 */
+    public String getInstanceName() { return instanceName; }
     public String getModelId() { return modelId; }
     public String getWeightsPath() { return weightsPath; }
     public int getPort() { return port; }

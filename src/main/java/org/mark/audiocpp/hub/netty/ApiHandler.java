@@ -252,7 +252,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         }
         try {
             ModelInstance instance = instanceManager.start(modelId, weightsPath, backend, device, port,
-                    threads, executablePath, executableName, serverTask, env);
+                    threads, executablePath, executableName, serverTask, env, optString(body, "name"));
             sendJson(ctx, HttpResponseStatus.OK, Jsons.GSON.toJson(toJson(instance)), request);
         } catch (Exception e) {
             log.error("启动实例失败", e);
@@ -357,6 +357,10 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         if (executableId != null && !executableId.isEmpty()) {
             fields.addProperty("executableId", executableId);
         }
+        String instanceName = optString(body, "instanceName");
+        if (instanceName != null && !instanceName.trim().isEmpty()) {
+            fields.addProperty("instanceName", instanceName.trim());
+        }
         for (String key : new String[]{"device", "port", "threads"}) {
             if (body.has(key) && body.get(key).isJsonPrimitive()) {
                 int value;
@@ -421,7 +425,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         }
         // 同步阻塞转发：Netty worker 线程会被占住，但并发量极小（本地单用户工具），可接受
         try {
-            String result = speechForwarder.forward(instance.getPort(), body);
+            String result = speechForwarder.forward(instance, body);
             sendJson(ctx, HttpResponseStatus.OK, result, request);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -627,6 +631,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
     private Map<String, Object> toJson(ModelInstance instance) {
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("id", instance.getId());
+        map.put("instanceName", instance.getInstanceName());
         map.put("modelId", instance.getModelId());
         map.put("weightsPath", instance.getWeightsPath());
         map.put("port", instance.getPort());

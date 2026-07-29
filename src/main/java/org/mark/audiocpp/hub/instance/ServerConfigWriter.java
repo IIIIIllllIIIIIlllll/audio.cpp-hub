@@ -9,15 +9,15 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-/** 用 gson 生成 audiocpp_server 的 server.json。模型 id 固定为 "model"。 */
+/** 用 gson 生成 audiocpp_server 的 server.json。model id 即实例服务名（/v1/* 路由键）。 */
 public final class ServerConfigWriter {
 
     private ServerConfigWriter() {}
 
     public static void write(Path path, String host, int port, String backend, Integer device, Integer threads,
-                             String modelId, String weightsPath, String task) throws IOException {
+                             String instanceName, String modelId, String weightsPath, String task) throws IOException {
         JsonObject model = new JsonObject();
-        model.addProperty("id", "model");
+        model.addProperty("id", instanceName);
         model.addProperty("family", modelId);
         model.addProperty("path", weightsPath);
         model.addProperty("task", task);

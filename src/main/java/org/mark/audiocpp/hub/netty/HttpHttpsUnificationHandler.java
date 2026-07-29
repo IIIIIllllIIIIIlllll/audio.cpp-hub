@@ -18,6 +18,8 @@ import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.handler.timeout.ReadTimeoutHandler;
+import org.mark.audiocpp.hub.AudioHubServer;
+import org.mark.audiocpp.hub.proxy.V1ProxyHandler;
 
 /**
  * HTTP/HTTPS 统一端口处理器。
@@ -54,16 +56,16 @@ public class HttpHttpsUnificationHandler extends ByteToMessageDecoder {
     private static final CloseOnExceptionHandler CLOSE_ON_EXCEPTION = new CloseOnExceptionHandler();
 
     private final SslContext sslContext;
-    private final int httpsPort;
+    private final AudioHubServer.HubConfig config;
     private final InstanceManager instanceManager;
     private final ExecutableRegistry executableRegistry;
     private final ProfileRegistry profileRegistry;
 
-    public HttpHttpsUnificationHandler(SslContext sslContext, int httpsPort,
+    public HttpHttpsUnificationHandler(SslContext sslContext, AudioHubServer.HubConfig config,
             InstanceManager instanceManager, ExecutableRegistry executableRegistry,
             ProfileRegistry profileRegistry) {
         this.sslContext = sslContext;
-        this.httpsPort = httpsPort;
+        this.config = config;
         this.instanceManager = instanceManager;
         this.executableRegistry = executableRegistry;
         this.profileRegistry = profileRegistry;
@@ -135,7 +137,7 @@ public class HttpHttpsUnificationHandler extends ByteToMessageDecoder {
     private void enableHttpRedirect(ChannelPipeline pipeline) {
         pipeline.addLast(new HttpServerCodec());
         pipeline.addLast(new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
-        pipeline.addLast(new HttpToHttpsRedirectHandler(httpsPort));
+        pipeline.addLast(new HttpToHttpsRedirectHandler(config.httpPort));
         pipeline.addLast(CLOSE_ON_EXCEPTION);
     }
 
@@ -144,6 +146,7 @@ public class HttpHttpsUnificationHandler extends ByteToMessageDecoder {
      */
     private void addCommonHttpHandlers(ChannelPipeline pipeline) {
         pipeline.addLast(new HttpServerCodec());
+        pipeline.addLast(new V1ProxyHandler(instanceManager, config.proxyMaxBodyBytes));
         pipeline.addLast(new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
         pipeline.addLast(new ApiHandler(instanceManager, executableRegistry, profileRegistry));
         pipeline.addLast(new StaticFileHandler());

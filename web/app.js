@@ -587,6 +587,7 @@ $("launch-profile").onchange = () => {
   const p = selectedProfile();
   if (p) {
     $("launch-weights").value = p.weightsPath || "";
+    $("launch-name").value = p.instanceName || "";
     $("launch-backend").value = p.backend || "cpu";
     $("launch-device").value = p.device ?? "";
     $("launch-port").value = p.port ?? "";
@@ -608,6 +609,8 @@ function collectProfileFields(name) {
   };
   const execId = $("launch-exec").value;
   if (execId) fields.executableId = execId;
+  const instanceName = $("launch-name").value.trim();
+  if (instanceName) fields.instanceName = instanceName;
   const device = $("launch-device").value;
   const port = $("launch-port").value;
   const threads = $("launch-threads").value;
@@ -687,6 +690,8 @@ $("launch-btn").onclick = async () => {
   };
   const execId = $("launch-exec").value;
   if (execId) body.executableId = execId;
+  const name = $("launch-name").value.trim();
+  if (name) body.name = name;
   const device = $("launch-device").value;
   const port = $("launch-port").value;
   const threads = $("launch-threads").value;
@@ -738,7 +743,7 @@ function renderInstanceList() {
     const card = document.createElement("div");
     const statusClass = STATUS_CLASS[inst.status] || "stopped";
     card.className = "card" + (inst.id === activeInstanceId ? " selected" : "");
-    let html = `<div class="card-title">#${inst.id} <span class="badge ${statusClass}">${statusText(inst.status)}</span></div>
+    let html = `<div class="card-title">#${inst.id}${inst.instanceName ? ` <span class="badge">${inst.instanceName}</span>` : ""} <span class="badge ${statusClass}">${statusText(inst.status)}</span></div>
       <div class="card-desc">${inst.backend}${inst.device != null ? ":" + inst.device : ""} ｜ ${t("instance.port")} ${inst.port}${inst.executableName ? " ｜ " + inst.executableName : ""}</div>`;
     if (inst.status === "ERROR" && inst.errorMessage) {
       html += `<div class="error-text">${inst.errorMessage}</div>`;
