@@ -240,11 +240,14 @@
           <section id="settings-pane-executables" class="settings-pane hidden">
             <div class="exec-body">
               <div id="exec-list-section">
-                <div class="exec-section-title" data-i18n="exec.listTitle">已添加的可执行文件</div>
+                <div class="exec-list-header">
+                  <div class="exec-section-title" data-i18n="exec.listTitle">已添加的可执行文件</div>
+                  <button id="exec-new-btn" type="button" class="btn" data-i18n="exec.new">新增</button>
+                </div>
                 <div id="exec-list" class="exec-list"></div>
               </div>
-              <div id="exec-form-section">
-                <div class="exec-section-title" data-i18n="exec.addTitle">添加可执行文件</div>
+              <div id="exec-form-section" class="hidden">
+                <div class="exec-section-title" id="exec-form-title" data-i18n="exec.addTitle">添加可执行文件</div>
                 <div class="exec-add">
                   <label><span data-i18n="exec.name">名称</span><input id="exec-name" type="text" data-i18n-placeholder="exec.namePlaceholder" placeholder="例如 CUDA 版"></label>
                   <label><span data-i18n="exec.path">路径</span>
@@ -254,7 +257,11 @@
                     </div>
                   </label>
                   <label><span data-i18n="exec.note">备注（可选）</span><input id="exec-note" type="text"></label>
-                  <button id="exec-add-btn" class="btn" data-i18n="exec.add">添加</button>
+                  <label><span data-i18n="exec.env">环境变量（可选）</span><textarea id="exec-env" rows="3" data-i18n-placeholder="exec.envPlaceholder" placeholder="每行一个 KEY=VALUE"></textarea></label>
+                  <div class="exec-form-btns">
+                    <button id="exec-add-btn" class="btn" data-i18n="exec.add">添加</button>
+                    <button id="exec-cancel-edit-btn" type="button" data-i18n="exec.cancel">取消</button>
+                  </div>
                   <div id="exec-msg" class="msg"></div>
                 </div>
               </div>

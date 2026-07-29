@@ -19,10 +19,14 @@ import java.util.UUID;
 
 /**
  * 可执行文件注册表：持久化到工作目录下 executables.json。
- * 条目：{id, name, path, note?, createdAt}；list 输出附带 exists 布尔。
+ * 条目：{id, name, path, note?, env?, createdAt}；list 输出附带 exists 布尔。
+ * env 为可选的环境变量表（{变量名: 值}），拉起子进程时注入 ProcessBuilder，
+ * 值中可用 ${VAR} 引用 hub 进程已有的环境变量（如 PATH=C:\...\bin;${PATH} 表示前置追加）。
  * 文件不存在/为空即为空列表，不做任何种子。
  */
 public class ExecutableRegistry {
+
+    private static final java.util.regex.Pattern ENV_KEY = java.util.regex.Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
 
     private final Path file = Path.of("executables.json");
 
@@ -39,14 +43,58 @@ public class ExecutableRegistry {
 
     /** 添加条目：name/path 必填；文件不存在则拒绝。Windows 下自动补 .exe 探测；
      *  输入目录路径时，在目录内（含 bin/ 子目录）自动定位 audiocpp_server 可执行文件。 */
-    public synchronized JsonObject add(String name, String path, String note) throws IOException {
-        if (name == null || name.trim().isEmpty()) {
+    public synchronized JsonObject add(String name, String path, String note, JsonObject env) throws IOException {
+        JsonObject entry = newEntry(name, path, note, env);
+        validateAndResolve(entry);
+        JsonArray array = readFile();
+        array.add(entry);
+        writeFile(array);
+        JsonObject copy = entry.deepCopy();
+        copy.addProperty("exists", true);
+        return copy;
+    }
+
+    /** 更新条目字段（id/createdAt 保留）；不存在返回 null。校验规则与 add 相同。 */
+    public synchronized JsonObject update(String id, String name, String path, String note, JsonObject env) throws IOException {
+        JsonArray array = readFile();
+        for (int i = 0; i < array.size(); i++) {
+            JsonObject entry = array.get(i).getAsJsonObject();
+            if (!entry.get("id").getAsString().equals(id)) {
+                continue;
+            }
+            JsonObject updated = newEntry(name, path, note, env);
+            updated.addProperty("id", entry.get("id").getAsString());
+            updated.addProperty("createdAt", entry.get("createdAt").getAsString());
+            validateAndResolve(updated);
+            array.set(i, updated);
+            writeFile(array);
+            JsonObject copy = updated.deepCopy();
+            copy.addProperty("exists", true);
+            return copy;
+        }
+        return null;
+    }
+
+    /** 校验 name/path/env 并把目录路径解析为目录内的可执行文件，非法时抛 UserException。 */
+    private void validateAndResolve(JsonObject entry) {
+        String name = entry.has("name") && entry.get("name").isJsonPrimitive()
+                ? entry.get("name").getAsString() : null;
+        if (name == null || name.isEmpty()) {
             throw new UserException("NAME_REQUIRED", "名称不能为空");
         }
-        if (path == null || path.trim().isEmpty()) {
+        String rawPath = entry.has("path") && entry.get("path").isJsonPrimitive()
+                ? entry.get("path").getAsString() : null;
+        if (rawPath == null || rawPath.isEmpty()) {
             throw new UserException("PATH_REQUIRED", "路径不能为空");
         }
-        JsonObject entry = newEntry(name.trim(), path.trim(), note);
+        if (entry.has("env")) {
+            for (Map.Entry<String, JsonElement> e : entry.get("env").getAsJsonObject().entrySet()) {
+                if (!ENV_KEY.matcher(e.getKey()).matches()) {
+                    throw new UserException("ENV_KEY_INVALID", Map.of("key", e.getKey()),
+                            "环境变量名不合法: " + e.getKey());
+                }
+            }
+        }
         Path resolved = resolvePath(entry);
         if (Files.isDirectory(resolved)) {
             Path found = findExecutableInDir(resolved);
@@ -58,12 +106,6 @@ public class ExecutableRegistry {
         } else if (!exists(entry)) {
             throw new UserException("FILE_NOT_FOUND", Map.of("path", resolved.toString()), "文件不存在: " + resolved);
         }
-        JsonArray array = readFile();
-        array.add(entry);
-        writeFile(array);
-        JsonObject copy = entry.deepCopy();
-        copy.addProperty("exists", true);
-        return copy;
     }
 
     /** 在目录内（含 bin/ 子目录）查找 audiocpp_server 可执行文件，找不到返回 null。 */
@@ -133,13 +175,24 @@ public class ExecutableRegistry {
         return System.getProperty("os.name", "").toLowerCase().contains("win");
     }
 
-    private JsonObject newEntry(String name, String path, String note) {
+    private JsonObject newEntry(String name, String path, String note, JsonObject env) {
         JsonObject entry = new JsonObject();
         entry.addProperty("id", UUID.randomUUID().toString().substring(0, 8));
-        entry.addProperty("name", name);
-        entry.addProperty("path", path);
+        entry.addProperty("name", name == null ? null : name.trim());
+        entry.addProperty("path", path == null ? null : path.trim());
         if (note != null && !note.trim().isEmpty()) {
             entry.addProperty("note", note.trim());
+        }
+        if (env != null && env.size() > 0) {
+            JsonObject cleaned = new JsonObject();
+            for (Map.Entry<String, JsonElement> e : env.entrySet()) {
+                if (e.getValue().isJsonPrimitive()) {
+                    cleaned.addProperty(e.getKey().trim(), e.getValue().getAsString());
+                }
+            }
+            if (cleaned.size() > 0) {
+                entry.add("env", cleaned);
+            }
         }
         entry.addProperty("createdAt", Instant.now().toString());
         return entry;

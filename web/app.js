@@ -170,6 +170,7 @@ function activateSettingsSection(section) {
   document.querySelectorAll(".settings-pane").forEach(p => p.classList.add("hidden"));
   $("settings-pane-" + section).classList.remove("hidden");
   if (section === "https") loadCertStatus();
+  if (section === "executables") resetExecForm();
 }
 document.querySelectorAll(".settings-nav-item").forEach(btn => {
   btn.onclick = () => activateSettingsSection(btn.dataset.section);
@@ -395,14 +396,89 @@ function renderExecList() {
     if (ex.note) {
       html += `<div class="exec-note">${ex.note}</div>`;
     }
-    html += `</div><button class="stop-btn exec-del">${t("exec.delete")}</button>`;
+    if (ex.env && Object.keys(ex.env).length) {
+      html += `<div class="exec-env-line">${t("exec.envSummary", { keys: Object.keys(ex.env).join(", ") })}</div>`;
+    }
+    html += `</div><button class="stop-btn exec-edit">${t("exec.edit")}</button><button class="stop-btn exec-del">${t("exec.delete")}</button>`;
     row.innerHTML = html;
+    row.querySelector(".exec-edit").onclick = () => startEditExec(ex);
     row.querySelector(".exec-del").onclick = async () => {
       await fetch("/api/executables/" + ex.id, { method: "DELETE" });
+      if (editingExecId === ex.id) resetExecForm();
       loadExecutables();
     };
     list.appendChild(row);
   }
+}
+
+/* 正在编辑的可执行文件 id，null 表示新增模式；表单默认收起，点“新增”/“编辑”才展开 */
+let editingExecId = null;
+
+function showExecForm() {
+  $("exec-form-section").classList.remove("hidden");
+}
+
+function hideExecForm() {
+  $("exec-form-section").classList.add("hidden");
+  $("exec-msg").textContent = "";
+}
+
+function startEditExec(ex) {
+  editingExecId = ex.id;
+  $("exec-name").value = ex.name || "";
+  $("exec-path").value = ex.path || "";
+  $("exec-note").value = ex.note || "";
+  $("exec-env").value = envToText(ex.env);
+  $("exec-msg").textContent = "";
+  const title = $("exec-form-title");
+  title.dataset.i18n = "exec.editTitle";
+  title.textContent = t("exec.editTitle");
+  const btn = $("exec-add-btn");
+  btn.dataset.i18n = "exec.save";
+  btn.textContent = t("exec.save");
+  showExecForm();
+}
+
+function resetExecForm() {
+  editingExecId = null;
+  $("exec-name").value = "";
+  $("exec-path").value = "";
+  $("exec-note").value = "";
+  $("exec-env").value = "";
+  const title = $("exec-form-title");
+  title.dataset.i18n = "exec.addTitle";
+  title.textContent = t("exec.addTitle");
+  const btn = $("exec-add-btn");
+  btn.dataset.i18n = "exec.add";
+  btn.textContent = t("exec.add");
+  hideExecForm();
+}
+
+$("exec-new-btn").onclick = () => {
+  resetExecForm();
+  showExecForm();
+};
+$("exec-cancel-edit-btn").onclick = resetExecForm;
+
+/* 解析环境变量输入：每行 KEY=VALUE，空行忽略；格式错误抛带行号的异常 */
+function parseEnvText() {
+  const env = {};
+  const lines = $("exec-env").value.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const eq = line.indexOf("=");
+    if (eq <= 0 || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(line.substring(0, eq).trim())) {
+      throw new Error(t("exec.envInvalid", { line: i + 1 }));
+    }
+    env[line.substring(0, eq).trim()] = line.substring(eq + 1).trim();
+  }
+  return env;
+}
+
+function envToText(env) {
+  if (!env) return "";
+  return Object.entries(env).map(([k, v]) => k + "=" + v).join("\n");
 }
 
 function updateLaunchExec() {
@@ -422,28 +498,35 @@ function updateLaunchExec() {
 $("exec-add-btn").onclick = async () => {
   const msg = $("exec-msg");
   msg.textContent = "";
+  let env;
+  try {
+    env = parseEnvText();
+  } catch (e) {
+    msg.textContent = e.message;
+    return;
+  }
   const body = {
     name: $("exec-name").value.trim(),
     path: $("exec-path").value.trim(),
-    note: $("exec-note").value.trim()
+    note: $("exec-note").value.trim(),
+    env
   };
+  const editing = editingExecId !== null;
   try {
-    const res = await fetch("/api/executables", {
-      method: "POST",
+    const res = await fetch(editing ? "/api/executables/" + editingExecId : "/api/executables", {
+      method: editing ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
     });
     const text = await res.text();
     if (!res.ok) {
-      msg.textContent = t("exec.addFailed") + t("common.colon") + I18N.errText(text);
+      msg.textContent = t(editing ? "exec.saveFailed" : "exec.addFailed") + t("common.colon") + I18N.errText(text);
       return;
     }
-    $("exec-name").value = "";
-    $("exec-path").value = "";
-    $("exec-note").value = "";
+    resetExecForm();
     loadExecutables();
   } catch (e) {
-    msg.textContent = t("exec.addFailed") + t("common.colon") + e.message;
+    msg.textContent = t(editing ? "exec.saveFailed" : "exec.addFailed") + t("common.colon") + e.message;
   }
 };
 

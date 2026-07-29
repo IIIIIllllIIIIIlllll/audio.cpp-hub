@@ -30,6 +30,8 @@ public class InstanceManager {
 
     private static final Logger log = LoggerFactory.getLogger(InstanceManager.class);
     private static final int HEALTH_TIMEOUT_SECONDS = 120;
+    private static final java.util.regex.Pattern ENV_PLACEHOLDER =
+            java.util.regex.Pattern.compile("\\$\\{([A-Za-z_][A-Za-z0-9_]*)\\}");
 
     private final AudioHubServer.HubConfig config;
     private final Map<String, ModelInstance> instances = new ConcurrentHashMap<>();
@@ -56,10 +58,12 @@ public class InstanceManager {
     /**
      * 启动一个实例，立即返回（STARTING），后台线程轮询健康状态。
      * 进程拉起失败时记事件并抛异常，不会留下僵尸实例。
+     * env 为可执行文件条目上配置的环境变量表，注入子进程；值中 ${VAR} 按 hub 进程环境展开。
      */
     public ModelInstance start(String modelId, String weightsPath, String backend,
                                Integer device, Integer requestedPort, Integer threads,
-                               String executablePath, String executableName, String serverTask) throws IOException {
+                               String executablePath, String executableName, String serverTask,
+                               Map<String, String> env) throws IOException {
         String id = UUID.randomUUID().toString().substring(0, 8);
         MDC.put("modelId", id);
         try {
@@ -73,6 +77,13 @@ public class InstanceManager {
             ProcessBuilder pb = new ProcessBuilder(executablePath, "--config", serverJson.toAbsolutePath().toString());
             pb.redirectErrorStream(true);
             pb.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile.toFile()));
+            if (env != null && !env.isEmpty()) {
+                Map<String, String> processEnv = pb.environment();
+                for (Map.Entry<String, String> e : env.entrySet()) {
+                    processEnv.put(e.getKey(), expandEnvValue(e.getValue(), processEnv));
+                }
+                log.info("注入环境变量: {}", String.join(", ", env.keySet()));
+            }
             Process process;
             try {
                 process = pb.start();
@@ -239,6 +250,18 @@ public class InstanceManager {
                 }
             }
         }
+    }
+
+    /** 展开值中的 ${VAR} 占位符（按子进程将继承的环境查值，未定义展开为空串）。 */
+    private static String expandEnvValue(String value, Map<String, String> processEnv) {
+        java.util.regex.Matcher m = ENV_PLACEHOLDER.matcher(value);
+        StringBuilder sb = new StringBuilder();
+        while (m.find()) {
+            String replacement = processEnv.getOrDefault(m.group(1), "");
+            m.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement(replacement));
+        }
+        m.appendTail(sb);
+        return sb.toString();
     }
 
     /** 读取实例日志末尾几行，用于错误诊断。 */

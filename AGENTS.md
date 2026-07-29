@@ -32,7 +32,8 @@ src/main/java/org/mark/audiocpp/hub/
 ├── instance/             # InstanceManager（子进程生命周期、端口分配、健康轮询、run/<id> 清理）、ModelInstance、
 │                         # ServerConfigWriter（写实例 server.json）、EventLog（事件，GET /api/events）
 ├── proxy/                # SpeechForwarder：任务请求同步阻塞转发到实例 /v1/tasks/run
-├── config/               # ExecutableRegistry（executables.json：audiocpp_server 可执行文件登记）、
+├── config/               # ExecutableRegistry（executables.json：audiocpp_server 可执行文件登记，条目可带 env 环境变量表，
+│                         # 拉起子进程时注入，值支持 ${VAR} 占位符按 hub 进程环境展开；支持 PUT /api/executables/<id> 更新）、
 │                         # ProfileRegistry（data/profiles.json：模型启动配置档案）
 ├── audio/                # AudioStore（data/uploads WAV 上传 + RIFF/WAV 头解析，无第三方依赖）、
 │                         # VoiceLibrary（data/voices 音色库）

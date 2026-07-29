@@ -546,6 +546,9 @@ footer { padding: 4px 24px 18px; }
   align-items: stretch;
 }
 .exec-body .exec-section-title { margin-top: 0; }
+.exec-list-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.exec-list-header .exec-section-title { margin: 0 0 8px; }
+.exec-list-header .btn { flex: none; margin-bottom: 8px; }
 #exec-form-section .exec-section-title { margin-top: 14px; }
 .exec-section-title {
   font-size: 13px;
@@ -573,7 +576,10 @@ footer { padding: 4px 24px 18px; }
 .exec-info { flex: 1; min-width: 0; }
 .exec-name { font-weight: 600; font-size: 13.5px; }
 .exec-note { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+.exec-env-line { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
 .exec-del { flex: none; padding: 4px 12px; font-size: 12px; }
+.exec-form-btns { display: flex; gap: 8px; align-items: center; }
+.exec-add textarea { width: 100%; box-sizing: border-box; resize: vertical; font-family: inherit; }
 .exec-add { margin-top: 0; }
 .exec-path {
   font-size: 12px;

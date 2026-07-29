@@ -1,6 +1,7 @@
 package org.mark.audiocpp.hub.netty;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import io.netty.channel.ChannelHandlerContext;
@@ -97,6 +98,8 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
             sendJson(ctx, HttpResponseStatus.OK, Jsons.GSON.toJson(executableRegistry.list()), request);
         } else if (method.equals(HttpMethod.POST) && path.equals("/api/executables")) {
             handleExecutableAdd(ctx, request);
+        } else if (method.equals(HttpMethod.PUT) && path.startsWith("/api/executables/")) {
+            handleExecutableUpdate(ctx, request, path.substring("/api/executables/".length()));
         } else if (method.equals(HttpMethod.DELETE) && path.startsWith("/api/executables/")) {
             String id = path.substring("/api/executables/".length());
             if (executableRegistry.delete(id)) {
@@ -238,9 +241,18 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         String executablePath = executableRegistry.resolvePath(executable).toString();
         String executableName = executable.get("name").getAsString();
         String serverTask = modelEntry.has("serverTask") ? modelEntry.get("serverTask").getAsString() : "tts";
+        // 条目可携带 env 环境变量表，拉起子进程时注入
+        Map<String, String> env = new LinkedHashMap<>();
+        if (executable.has("env") && executable.get("env").isJsonObject()) {
+            for (Map.Entry<String, JsonElement> e : executable.getAsJsonObject("env").entrySet()) {
+                if (e.getValue().isJsonPrimitive()) {
+                    env.put(e.getKey(), e.getValue().getAsString());
+                }
+            }
+        }
         try {
             ModelInstance instance = instanceManager.start(modelId, weightsPath, backend, device, port,
-                    threads, executablePath, executableName, serverTask);
+                    threads, executablePath, executableName, serverTask, env);
             sendJson(ctx, HttpResponseStatus.OK, Jsons.GSON.toJson(toJson(instance)), request);
         } catch (Exception e) {
             log.error("启动实例失败", e);
@@ -252,7 +264,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         }
     }
 
-    /** 添加可执行文件：{"name","path","note"?}。 */
+    /** 添加可执行文件：{"name","path","note"?,"env"?}，env 为 {变量名: 值} 对象。 */
     private void handleExecutableAdd(ChannelHandlerContext ctx, FullHttpRequest request) throws Exception {
         JsonObject body;
         try {
@@ -264,11 +276,40 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         }
         try {
             JsonObject entry = executableRegistry.add(optString(body, "name"),
-                    optString(body, "path"), optString(body, "note"));
+                    optString(body, "path"), optString(body, "note"), optEnv(body));
             sendJson(ctx, HttpResponseStatus.OK, entry.toString(), request);
         } catch (Exception e) {
             sendJson(ctx, HttpResponseStatus.BAD_REQUEST, errorJson(e), request);
         }
+    }
+
+    /** 更新可执行文件：{"name","path","note"?,"env"?}，id/createdAt 保留；不存在返回 404。 */
+    private void handleExecutableUpdate(ChannelHandlerContext ctx, FullHttpRequest request, String id) throws Exception {
+        JsonObject body;
+        try {
+            body = JsonParser.parseString(request.content().toString(CharsetUtil.UTF_8)).getAsJsonObject();
+        } catch (Exception e) {
+            sendJson(ctx, HttpResponseStatus.BAD_REQUEST,
+                    Jsons.error("INVALID_JSON", null, "请求体不是合法 JSON"), request);
+            return;
+        }
+        try {
+            JsonObject entry = executableRegistry.update(id, optString(body, "name"),
+                    optString(body, "path"), optString(body, "note"), optEnv(body));
+            if (entry == null) {
+                sendJson(ctx, HttpResponseStatus.NOT_FOUND,
+                        Jsons.error("EXEC_NOT_FOUND", Map.of("id", id), "可执行文件不存在: " + id), request);
+                return;
+            }
+            sendJson(ctx, HttpResponseStatus.OK, entry.toString(), request);
+        } catch (Exception e) {
+            sendJson(ctx, HttpResponseStatus.BAD_REQUEST, errorJson(e), request);
+        }
+    }
+
+    /** 提取请求体中的 env 对象（{变量名: 值}），缺失或非对象返回 null。 */
+    private JsonObject optEnv(JsonObject body) {
+        return body.has("env") && body.get("env").isJsonObject() ? body.getAsJsonObject("env") : null;
     }
 
     /**
