@@ -25,6 +25,7 @@ import org.mark.audiocpp.hub.proxy.SpeechForwarder;
 import org.mark.audiocpp.hub.util.Jsons;
 import org.mark.audiocpp.hub.util.ModelRegistry;
 import org.mark.audiocpp.hub.util.UserException;
+import org.mark.audiocpp.hub.util.WeightsPaths;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -114,13 +115,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
             List<JsonObject> profiles = profileRegistry.list();
             for (JsonObject p : profiles) {
                 String weightsPath = p.has("weightsPath") ? p.get("weightsPath").getAsString() : "";
-                boolean exists = false;
-                if (!weightsPath.isEmpty()) {
-                    Path wp = Path.of(weightsPath);
-                    exists = Files.isDirectory(wp)
-                            || (Files.isRegularFile(wp) && weightsPath.toLowerCase().endsWith(".gguf"));
-                }
-                p.addProperty("weightsExists", exists);
+                p.addProperty("weightsExists", WeightsPaths.exists(weightsPath));
             }
             sendJson(ctx, HttpResponseStatus.OK, Jsons.GSON.toJson(profiles), request);
         } else if (method.equals(HttpMethod.POST) && path.equals("/api/profiles")) {
@@ -207,6 +202,15 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
                     Jsons.error("WEIGHTS_REQUIRED", null, "weightsPath 不能为空"), request);
             return;
         }
+        if (!WeightsPaths.exists(weightsPath)) {
+            // 错误消息用原始输入：非法路径字符会让 resolve() 抛 InvalidPathException，不能再解析一次
+            sendJson(ctx, HttpResponseStatus.BAD_REQUEST,
+                    Jsons.error("WEIGHTS_NOT_FOUND", Map.of("path", weightsPath),
+                            "权重路径不存在: " + weightsPath), request);
+            return;
+        }
+        // 相对路径在此绝对化，确保写入 server.json 的是绝对路径（audiocpp_server 不按 hub 工作目录解析）
+        String resolvedWeights = WeightsPaths.resolve(weightsPath).toString();
         String backend = optString(body, "backend");
         if (backend == null || backend.isEmpty()) {
             backend = "cpu";
@@ -251,7 +255,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
             }
         }
         try {
-            ModelInstance instance = instanceManager.start(modelId, weightsPath, backend, device, port,
+            ModelInstance instance = instanceManager.start(modelId, resolvedWeights, backend, device, port,
                     threads, executablePath, executableName, serverTask, env, optString(body, "name"));
             sendJson(ctx, HttpResponseStatus.OK, Jsons.GSON.toJson(toJson(instance)), request);
         } catch (Exception e) {
