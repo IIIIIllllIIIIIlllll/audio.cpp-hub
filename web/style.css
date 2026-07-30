@@ -1,53 +1,55 @@
 /* ============================================================
-   audio.cpp-hub 设计系统：深色 Studio 风（默认）/ 浅色企业风
+   audio.cpp-hub 设计系统：黑白单色风（浅色默认 / 深色可选）
    ============================================================ */
 
 /* ---------- 主题变量 ---------- */
 :root[data-theme="dark"] {
-  --bg: #0b0e14;
-  --bg-elevated: #11151f;
+  --bg: #0c0c0e;
+  --bg-elevated: #141416;
   --card: rgba(255, 255, 255, 0.045);
-  --card-border: rgba(255, 255, 255, 0.09);
-  --header-bg: rgba(11, 14, 20, 0.78);
-  --input-bg: rgba(255, 255, 255, 0.055);
-  --text: #e6e9f2;
-  --text-dim: #8b93a9;
-  --accent: #6366f1;
-  --accent-2: #22d3ee;
-  --gradient: linear-gradient(135deg, #6366f1 0%, #22d3ee 100%);
-  --border: rgba(255, 255, 255, 0.12);
-  --ring: rgba(99, 102, 241, 0.35);
+  --card-border: rgba(255, 255, 255, 0.10);
+  --header-bg: rgba(12, 12, 14, 0.78);
+  --input-bg: rgba(255, 255, 255, 0.06);
+  --text: #ededf0;
+  --text-dim: #8e8e96;
+  --accent: #f0f0f2;
+  --accent-2: #9a9aa2;
+  --accent-contrast: #111114;
+  --gradient: #f0f0f2;
+  --border: rgba(255, 255, 255, 0.14);
+  --ring: rgba(255, 255, 255, 0.16);
   --shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
   --shadow-hover: 0 14px 36px rgba(0, 0, 0, 0.5);
   --ok: #34d399;
   --warn: #fbbf24;
   --err: #f87171;
   --wave-bg: rgba(255, 255, 255, 0.035);
-  --wave-dim: #465063;
+  --wave-dim: #4a4a52;
   --scrollbar: rgba(255, 255, 255, 0.14);
 }
 :root[data-theme="light"] {
-  --bg: #f6f7f9;
+  --bg: #f6f6f7;
   --bg-elevated: #ffffff;
   --card: #ffffff;
-  --card-border: #e5e7ee;
+  --card-border: #e4e4e8;
   --header-bg: rgba(255, 255, 255, 0.82);
   --input-bg: #ffffff;
-  --text: #1a2233;
-  --text-dim: #6b7280;
-  --accent: #6366f1;
-  --accent-2: #22d3ee;
-  --gradient: linear-gradient(135deg, #6366f1 0%, #22d3ee 100%);
-  --border: #e2e5ec;
-  --ring: rgba(99, 102, 241, 0.22);
-  --shadow: 0 4px 18px rgba(25, 35, 70, 0.08);
-  --shadow-hover: 0 10px 28px rgba(25, 35, 70, 0.13);
+  --text: #17181c;
+  --text-dim: #6d6d75;
+  --accent: #17181c;
+  --accent-2: #55555c;
+  --accent-contrast: #ffffff;
+  --gradient: #17181c;
+  --border: #e0e0e4;
+  --ring: rgba(0, 0, 0, 0.10);
+  --shadow: 0 4px 18px rgba(0, 0, 0, 0.07);
+  --shadow-hover: 0 10px 28px rgba(0, 0, 0, 0.12);
   --ok: #059669;
   --warn: #d97706;
   --err: #dc2626;
-  --wave-bg: #f1f3f8;
-  --wave-dim: #b9c0cf;
-  --scrollbar: rgba(20, 30, 60, 0.16);
+  --wave-bg: #f1f1f3;
+  --wave-dim: #b8b8bf;
+  --scrollbar: rgba(0, 0, 0, 0.16);
 }
 
 /* ---------- 基础 ---------- */
@@ -102,10 +104,7 @@ header {
   font-size: 20px;
   font-weight: 800;
   letter-spacing: 0.01em;
-  background: var(--gradient);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: var(--text);
 }
 .subtitle { font-size: 12.5px; color: var(--text-dim); }
 .theme-btn {
@@ -342,14 +341,14 @@ button:hover { filter: brightness(1.12); }
 button:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
 
 .btn {
-  background: var(--gradient);
+  background: var(--accent);
   border: none;
-  color: #fff;
+  color: var(--accent-contrast);
   font-weight: 600;
   padding: 9px 22px;
-  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
+  box-shadow: var(--shadow);
 }
-.btn:hover { filter: brightness(1.15); transform: translateY(-1px); }
+.btn:hover { opacity: 0.85; transform: translateY(-1px); }
 .btn:disabled { transform: none; box-shadow: none; }
 
 .btn-ghost {
@@ -461,8 +460,8 @@ details summary:hover { text-decoration: underline; }
   font-size: 12.5px;
 }
 .tab.active, .picker-tab.active {
-  background: var(--gradient);
-  color: #fff;
+  background: var(--accent);
+  color: var(--accent-contrast);
   font-weight: 600;
 }
 
@@ -738,7 +737,7 @@ footer { padding: 4px 24px 18px; }
   transition: transform 0.2s ease;
 }
 .switch input:checked + .switch-slider { background: var(--accent); }
-.switch input:checked + .switch-slider::before { transform: translateX(18px); }
+.switch input:checked + .switch-slider::before { transform: translateX(18px); background: var(--accent-contrast); }
 
 /* HTTPS 面板表单 */
 #settings-pane-https .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -986,10 +985,10 @@ footer { padding: 4px 24px 18px; }
   font-size: 10.5px;
   font-weight: 600;
 }
-.cat-tts { background: rgba(99, 102, 241, 0.18); color: var(--accent); }
-.cat-asr { background: rgba(34, 211, 238, 0.15); color: var(--accent-2); }
-.cat-sep { background: rgba(52, 211, 153, 0.15); color: var(--ok); }
-.cat-other { background: rgba(251, 191, 36, 0.15); color: var(--warn); }
+.cat-tts, .cat-asr, .cat-sep, .cat-other {
+  background: var(--ring);
+  color: var(--text-dim);
+}
 
 .panel-card { padding: 20px 22px; }
 .panel-card h2 { margin-top: 0; }
@@ -1042,10 +1041,7 @@ footer { padding: 4px 24px 18px; }
   flex: 0 0 90px;
   font-size: 13px;
   font-weight: 600;
-  background: var(--gradient);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: var(--text);
 }
 .track-row audio { flex: 1; height: 36px; }
 
