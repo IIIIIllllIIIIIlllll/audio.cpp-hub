@@ -77,6 +77,8 @@ h3 { font-size: 14px; font-weight: 600; margin: 0 0 12px; }
 
 .hidden { display: none !important; }
 .hint { font-size: 12.5px; color: var(--text-dim); margin: 6px 0; }
+/* 可执行文件为空时的占位下拉：弱化文字 + 指针提示可点击跳转设置 */
+#launch-exec.exec-empty { cursor: pointer; color: var(--text-dim); }
 .msg { font-size: 13px; color: var(--err); margin-top: 8px; white-space: pre-wrap; word-break: break-all; }
 .error-text { font-size: 12px; color: var(--err); margin-top: 4px; word-break: break-all; }
 
@@ -226,8 +228,11 @@ footer { flex: none; }
   margin-left: auto;
   font-size: 10px;
   font-weight: 700;
+  font-family: inherit;
+  line-height: 1.5;
   color: var(--accent);
-  text-decoration: none;
+  background: transparent;
+  cursor: pointer;
   padding: 1px 6px;
   border: 1px solid var(--accent);
   border-radius: 6px;
@@ -235,7 +240,42 @@ footer { flex: none; }
   transition: opacity 0.15s;
   flex-shrink: 0;
 }
-#model-list .hf-link:hover { opacity: 1; }
+#model-list .hf-link:hover, #model-list .hf-link.open { opacity: 1; }
+
+/* HF 仓库弹出菜单：共享元素挂 body，JS 定位 */
+#hf-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 158px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-hover);
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.95);
+  transform-origin: top right;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+#hf-menu.open { opacity: 1; pointer-events: auto; transform: scale(1); }
+#hf-menu a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  color: var(--text);
+  text-decoration: none;
+  border-radius: 7px;
+  white-space: nowrap;
+}
+#hf-menu a:hover { background: var(--ring); color: var(--accent); }
+#hf-menu .hf-menu-ext { font-size: 10px; color: var(--text-dim); }
 
 /* ---------- 状态徽标 / pill ---------- */
 .badge {

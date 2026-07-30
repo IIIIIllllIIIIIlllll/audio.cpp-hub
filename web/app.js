@@ -111,7 +111,61 @@ function modelConfigured(m) {
   return weightsOk && executables.some(e => e.exists);
 }
 
+let hfMenuEl = null;
+let hfMenuAnchor = null;
+
+function hfMirrorOf(url) {
+  return url ? url.replace("https://huggingface.co/", "https://hf-mirror.com/") : null;
+}
+
+function closeHfMenu() {
+  if (hfMenuEl) hfMenuEl.classList.remove("open");
+  if (hfMenuAnchor) hfMenuAnchor.classList.remove("open");
+  hfMenuAnchor = null;
+}
+
+function openHfMenu(anchor, m) {
+  if (!hfMenuEl) {
+    hfMenuEl = document.createElement("div");
+    hfMenuEl.id = "hf-menu";
+    document.body.appendChild(hfMenuEl);
+    hfMenuEl.addEventListener("click", (e) => { if (e.target.closest("a")) closeHfMenu(); });
+  }
+  const items = [
+    { label: t("model.hfMenu.hf"), url: m.hfUrl },
+    { label: t("model.hfMenu.mirror"), url: hfMirrorOf(m.hfUrl) },
+    { label: t("model.hfMenu.gguf"), url: m.ggufUrl },
+    { label: t("model.hfMenu.ggufMirror"), url: hfMirrorOf(m.ggufUrl) },
+  ].filter(x => x.url);
+  hfMenuEl.innerHTML = items.map(x => `<a href="${x.url}" target="_blank" rel="noopener">${x.label}<span class="hf-menu-ext">↗</span></a>`).join("");
+  closeHfMenu();
+  hfMenuAnchor = anchor;
+  anchor.classList.add("open");
+  hfMenuEl.classList.add("open");
+  const r = anchor.getBoundingClientRect();
+  const mw = hfMenuEl.offsetWidth, mh = hfMenuEl.offsetHeight;
+  let top = r.bottom + 6;
+  if (top + mh > window.innerHeight - 8) top = Math.max(8, r.top - mh - 6);
+  let right = window.innerWidth - r.right;
+  if (right + mw > window.innerWidth - 8) right = 8;
+  hfMenuEl.style.top = top + "px";
+  hfMenuEl.style.right = right + "px";
+}
+
+function toggleHfMenu(anchor, m) {
+  if (hfMenuAnchor === anchor) { closeHfMenu(); return; }
+  openHfMenu(anchor, m);
+}
+
+document.addEventListener("mousedown", (e) => {
+  if (hfMenuAnchor && !e.target.closest("#hf-menu") && !e.target.closest(".hf-link")) closeHfMenu();
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeHfMenu(); });
+document.addEventListener("scroll", closeHfMenu, true);
+window.addEventListener("resize", closeHfMenu);
+
 function renderModelList() {
+  closeHfMenu();
   const list = $("model-list");
   list.innerHTML = "";
   for (const cat of CATEGORY_ORDER) {
@@ -125,12 +179,12 @@ function renderModelList() {
       const usable = modelConfigured(m);
       const card = document.createElement("div");
       card.className = "card" + (m.id === selectedModelId ? " selected" : "") + (usable ? "" : " unconfigured");
-      card.innerHTML = `<div class="card-title">${I18N.pick(m, "displayName")}${usable ? "" : ` <span class="badge unconfigured">${t("model.unconfigured")}</span>`}${m.hfUrl ? `<a class="hf-link" href="${m.hfUrl}" target="_blank" rel="noopener" title="${t("model.hfRepo")}">HF</a>` : ""}</div>
+      card.innerHTML = `<div class="card-title">${I18N.pick(m, "displayName")}${usable ? "" : ` <span class="badge unconfigured">${t("model.unconfigured")}</span>`}${m.hfUrl ? `<button class="hf-link" title="${t("model.hfRepo")}">HF ▾</button>` : ""}</div>
         <div class="card-family">${m.family} <span class="cat-badge cat-${cat}">${categoryName(cat)}</span></div>
         <div class="card-desc">${I18N.pick(m, "description")}</div>`;
       if (!usable) card.title = t("model.unconfiguredTip");
-      const hfLink = card.querySelector(".hf-link");
-      if (hfLink) hfLink.onclick = (e) => e.stopPropagation();
+      const hfBtn = card.querySelector(".hf-link");
+      if (hfBtn) hfBtn.onclick = (e) => { e.stopPropagation(); toggleHfMenu(hfBtn, m); };
       card.onclick = () => {
         selectedModelId = m.id;
         renderModelList();
@@ -486,16 +540,32 @@ function envToText(env) {
 function updateLaunchExec() {
   const sel = $("launch-exec");
   sel.innerHTML = "";
+  const empty = executables.length === 0;
+  if (empty) {
+    // 无可用程序时显示占位项，点击下拉即跳转到设置页添加（见下方 mousedown 处理）
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = t("launch.execNone");
+    sel.appendChild(opt);
+  }
   for (const ex of executables) {
     const opt = document.createElement("option");
     opt.value = ex.id;
     opt.textContent = ex.name + (ex.exists ? "" : t("exec.missingSuffix"));
     sel.appendChild(opt);
   }
-  const empty = executables.length === 0;
+  sel.classList.toggle("exec-empty", empty);
   $("launch-btn").disabled = empty;
   $("exec-empty-hint").classList.toggle("hidden", !empty);
 }
+
+/* 可执行文件为空时，点击下拉框直接跳转到设置页的可执行文件面板 */
+$("launch-exec").addEventListener("mousedown", (e) => {
+  if (executables.length === 0) {
+    e.preventDefault();
+    openSettingsModal("executables");
+  }
+});
 
 $("exec-add-btn").onclick = async () => {
   const msg = $("exec-msg");
