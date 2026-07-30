@@ -125,10 +125,12 @@ function renderModelList() {
       const usable = modelConfigured(m);
       const card = document.createElement("div");
       card.className = "card" + (m.id === selectedModelId ? " selected" : "") + (usable ? "" : " unconfigured");
-      card.innerHTML = `<div class="card-title">${I18N.pick(m, "displayName")}${usable ? "" : ` <span class="badge unconfigured">${t("model.unconfigured")}</span>`}</div>
+      card.innerHTML = `<div class="card-title">${I18N.pick(m, "displayName")}${usable ? "" : ` <span class="badge unconfigured">${t("model.unconfigured")}</span>`}${m.hfUrl ? `<a class="hf-link" href="${m.hfUrl}" target="_blank" rel="noopener" title="${t("model.hfRepo")}">HF</a>` : ""}</div>
         <div class="card-family">${m.family} <span class="cat-badge cat-${cat}">${categoryName(cat)}</span></div>
         <div class="card-desc">${I18N.pick(m, "description")}</div>`;
       if (!usable) card.title = t("model.unconfiguredTip");
+      const hfLink = card.querySelector(".hf-link");
+      if (hfLink) hfLink.onclick = (e) => e.stopPropagation();
       card.onclick = () => {
         selectedModelId = m.id;
         renderModelList();

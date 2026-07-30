@@ -16,6 +16,7 @@ window.I18N = (() => {
     "nav.models": "模型",
     "nav.instances": "实例",
     "model.unconfigured": "未配置",
+    "model.hfRepo": "HuggingFace 模型仓库",
     "model.unconfiguredTip": "该模型还没配置权重目录和 audiocpp_server：点击“启动模型”完成设置并启动一次即可",
     /* ---------- 实例条 ---------- */
     "instance.barLabel": "实例",
@@ -363,6 +364,7 @@ window.I18N = (() => {
     "nav.instances": "Instances",
     "model.unconfigured": "No profile",
     "model.unconfiguredTip": "This model has no valid weights directory or audiocpp_server yet: open \"Launch model\", set them up and launch once",
+    "model.hfRepo": "HuggingFace model repo",
     /* ---------- instance bar ---------- */
     "instance.barLabel": "Instance",
     "instance.noReady": "No ready instance",

@@ -222,6 +222,20 @@ footer { flex: none; }
 }
 #model-list .group-title { margin: 8px 0 0; }
 #model-list .badge { padding: 1px 8px; font-size: 10.5px; }
+#model-list .hf-link {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent);
+  text-decoration: none;
+  padding: 1px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  opacity: 0.55;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+#model-list .hf-link:hover { opacity: 1; }
 
 /* ---------- 状态徽标 / pill ---------- */
 .badge {
