@@ -2,7 +2,9 @@ package org.mark.audiocpp.hub.audio;
 
 import org.mark.audiocpp.hub.util.UserException;
 
+import java.io.BufferedInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Files;
@@ -89,6 +91,63 @@ public final class AudioStore {
         if (audioFormat == -1 || dataSize < 0) {
             throw new UserException("WAV_CHUNKS_MISSING", "WAV 中缺少 fmt 或 data chunk");
         }
+        return buildInfo(audioFormat, channels, sampleRate, bitsPerSample, dataSize);
+    }
+
+    /**
+     * 流式解析 WAV 头：逐 chunk 读头，命中 data 记大小即止，不整文件读入内存。
+     * 用于操作历史的结果音频（可能几十 MB）。
+     */
+    public static WavInfo parseWav(Path path) throws IOException {
+        long fileSize = Files.size(path);
+        try (InputStream in = new BufferedInputStream(Files.newInputStream(path), 64 * 1024)) {
+            byte[] magic = in.readNBytes(12);
+            if (magic.length < 12
+                    || magic[0] != 'R' || magic[1] != 'I' || magic[2] != 'F' || magic[3] != 'F'
+                    || magic[8] != 'W' || magic[9] != 'A' || magic[10] != 'V' || magic[11] != 'E') {
+                throw new UserException("NOT_WAV", "不是标准 RIFF/WAVE 文件");
+            }
+            int audioFormat = -1, channels = 0, sampleRate = 0, bitsPerSample = 0;
+            long dataSize = -1;
+            long position = 12;
+            while (true) {
+                byte[] head = in.readNBytes(8);
+                if (head.length < 8) break;
+                int chunkId = leInt(head, 0);
+                long chunkSize = Integer.toUnsignedLong(leInt(head, 4));
+                position += 8;
+                if (chunkId == 0x20746D66) { // "fmt "
+                    byte[] fmt = in.readNBytes(16);
+                    if (fmt.length < 16) break;
+                    position += 16;
+                    audioFormat = Short.toUnsignedInt(leShort(fmt, 0));
+                    channels = Short.toUnsignedInt(leShort(fmt, 2));
+                    sampleRate = leInt(fmt, 4);
+                    bitsPerSample = Short.toUnsignedInt(leShort(fmt, 14));
+                    long rest = chunkSize - 16 + (chunkSize % 2);
+                    if (rest > 0) {
+                        skipFully(in, rest);
+                        position += rest;
+                    }
+                } else if (chunkId == 0x61746164) { // "data"：内容无需读取
+                    dataSize = Math.min(chunkSize, Math.max(0, fileSize - position));
+                    break;
+                } else {
+                    long skip = chunkSize + (chunkSize % 2);
+                    skipFully(in, skip);
+                    position += skip;
+                }
+            }
+            if (audioFormat == -1 || dataSize < 0) {
+                throw new UserException("WAV_CHUNKS_MISSING", "WAV 中缺少 fmt 或 data chunk");
+            }
+            return buildInfo(audioFormat, channels, sampleRate, bitsPerSample, dataSize);
+        }
+    }
+
+    /** 校验 fmt 参数并计算时长（两个 parseWav 共用的收尾逻辑）。 */
+    private static WavInfo buildInfo(int audioFormat, int channels, int sampleRate, int bitsPerSample,
+                                     long dataSize) {
         if (audioFormat != 1 && audioFormat != 3) {
             throw new UserException("WAV_NOT_PCM", Map.of("format", audioFormat),
                     "非 PCM WAV（audioFormat=" + audioFormat + "），仅支持 1(PCM int) 或 3(float)");
@@ -99,6 +158,26 @@ public final class AudioStore {
         double bytesPerSec = sampleRate * (double) channels * bitsPerSample / 8.0;
         double durationSec = bytesPerSec > 0 ? dataSize / bytesPerSec : 0;
         return new WavInfo(sampleRate, channels, bitsPerSample, durationSec);
+    }
+
+    private static int leInt(byte[] b, int off) {
+        return (b[off] & 0xFF) | ((b[off + 1] & 0xFF) << 8) | ((b[off + 2] & 0xFF) << 16) | ((b[off + 3] & 0xFF) << 24);
+    }
+
+    private static short leShort(byte[] b, int off) {
+        return (short) ((b[off] & 0xFF) | ((b[off + 1] & 0xFF) << 8));
+    }
+
+    private static void skipFully(InputStream in, long n) throws IOException {
+        long remaining = n;
+        while (remaining > 0) {
+            long skipped = in.skip(remaining);
+            if (skipped <= 0) {
+                if (in.read() < 0) break;
+                skipped = 1;
+            }
+            remaining -= skipped;
+        }
     }
 
     private static Map<String, Object> toMap(String id, String absPath, WavInfo info, long sizeBytes) {
@@ -114,11 +193,11 @@ public final class AudioStore {
     }
 
     /** 解析结果。 */
-    static final class WavInfo {
-        final int sampleRate;
-        final int channels;
-        final int bitsPerSample;
-        final double durationSec;
+    public static final class WavInfo {
+        public final int sampleRate;
+        public final int channels;
+        public final int bitsPerSample;
+        public final double durationSec;
 
         WavInfo(int sampleRate, int channels, int bitsPerSample, double durationSec) {
             this.sampleRate = sampleRate;

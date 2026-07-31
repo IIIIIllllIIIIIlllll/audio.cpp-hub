@@ -1059,3 +1059,109 @@ footer { padding: 4px 24px 18px; }
 }
 
 #tts-variant-row select, #tts-speaker-row select { max-width: 340px; }
+
+/* ---------- TTS 操作历史（右侧边栏） ---------- */
+#history-sidebar {
+  flex: 0 0 320px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  padding: 14px;
+}
+#history-close { display: none; }
+/* 窄屏悬浮按钮：桌面端隐藏 */
+#history-fab { display: none; }
+@media (max-width: 1100px) {
+  /* 历史侧边栏变为右侧抽屉，点击 🕘 弹出 */
+  #history-sidebar {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 250;
+    width: min(360px, 90vw);
+    flex: none;
+    border-radius: 0;
+    border: none;
+    border-left: 1px solid var(--border);
+    background: var(--bg-elevated);
+    box-shadow: var(--shadow-hover);
+    transform: translateX(105%);
+    transition: transform 0.25s ease;
+  }
+  #history-sidebar.open { transform: translateX(0); }
+  #history-close { display: flex; }
+  #history-fab {
+    display: flex;
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 200;
+    width: 44px;
+    height: 44px;
+    justify-content: center;
+    font-size: 20px;
+    border-radius: 50%;
+    box-shadow: var(--shadow-hover);
+  }
+}
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.history-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+}
+.history-actions { display: flex; gap: 8px; align-items: center; }
+.history-actions button,
+.history-actions .btn-ghost { padding: 4px 12px; font-size: 12px; }
+#history-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+#history-list .history-empty { padding: 12px 14px; margin: 0; }
+.history-row { padding: 10px 14px; }
+.history-row + .history-row { border-top: 1px solid var(--border); }
+/* 失败记录：左侧红条 + 文本弱化，与成功记录区分 */
+.history-row.failed { box-shadow: inset 3px 0 0 var(--err); }
+.history-row.failed .history-text { color: var(--text-dim); }
+.history-info { display: flex; align-items: center; gap: 10px; }
+.history-time {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.history-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-meta {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.history-btns { flex: none; display: flex; gap: 6px; }
+.history-btns button { padding: 3px 10px; font-size: 12px; }
+.history-error { margin-top: 4px; }
+.history-player { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.history-player audio { flex: 1; height: 34px; min-width: 0; }
+.history-player .btn-ghost { flex: none; padding: 4px 12px; font-size: 12px; }

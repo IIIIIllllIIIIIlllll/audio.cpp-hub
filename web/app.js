@@ -90,6 +90,19 @@ function closeDrawer() {
 $("menu-toggle").onclick = openDrawer;
 $("drawer-overlay").onclick = closeDrawer;
 
+/* ---------- 历史侧边栏抽屉（窄屏弹出，宽屏常驻右侧） ---------- */
+function openHistoryDrawer() {
+  $("history-sidebar").classList.add("open");
+  $("history-overlay").classList.remove("hidden");
+}
+function closeHistoryDrawer() {
+  $("history-sidebar").classList.remove("open");
+  $("history-overlay").classList.add("hidden");
+}
+$("history-fab").onclick = openHistoryDrawer;
+$("history-overlay").onclick = closeHistoryDrawer;
+$("history-close").onclick = closeHistoryDrawer;
+
 /* ---------- 模型列表（按 category 分组） ---------- */
 async function loadModels() {
   const res = await fetch("/api/models");
@@ -845,6 +858,7 @@ function updateInstanceBar() {
     opt.textContent = `#${inst.id} ｜ ${inst.backend}${inst.device != null ? ":" + inst.device : ""} ｜ ${t("instance.port")} ${inst.port}`;
     select.appendChild(opt);
   }
+  const prevActive = activeInstanceId;
   const has = ready.length > 0;
   if (has) {
     if (!ready.some(i => i.id === activeInstanceId)) {
@@ -854,6 +868,8 @@ function updateInstanceBar() {
   } else {
     activeInstanceId = null;
   }
+  // 轮询导致激活实例被动切换（如实例停止）时也刷新历史列表
+  if (prevActive !== activeInstanceId) loadHistory();
   select.disabled = !has;
   $("instance-stop").disabled = !has;
 
@@ -871,6 +887,7 @@ function updateInstanceBar() {
 $("instance-select").onchange = (e) => {
   activeInstanceId = e.target.value;
   renderInstanceList();
+  loadHistory();
 };
 
 $("instance-stop").onclick = async () => {
@@ -1085,7 +1102,7 @@ function renderEnumRow(container, m, prefix, exclude) {
   const s = m.paramSchema || {};
   for (const [key, p] of Object.entries(s)) {
     if (!p || Array.isArray(p) || p.type !== "enum" || exclude.includes(key)) continue;
-    container.appendChild(paramInput(key, p, `${prefix}-${key}`));
+    container.appendChild(paramInput(key, p, prefix));
   }
 }
 
@@ -1148,6 +1165,7 @@ function renderTtsPanel(m) {
   $("tts-result").classList.add("hidden");
   $("tts-msg").textContent = "";
   $("tts-stats").textContent = "";
+  loadHistory();
 }
 
 function updateTtsBlocks(m) {
@@ -1266,6 +1284,7 @@ $("tts-submit").onclick = async () => {
     download.href = url;
     $("tts-result").classList.remove("hidden");
     stats.textContent = t("common.doneElapsed", { verb: t("tts.verb"), t: fmtElapsed(start) });
+    loadHistory();
   } catch (e) {
     msg.textContent = t("common.failedElapsed", { verb: t("tts.verb"), t: fmtElapsed(start), msg: e.message });
   } finally {
@@ -1307,6 +1326,209 @@ function buildEmotionSliders() {
 $("tts-emotion-alpha").addEventListener("input", (e) => {
   $("emotion-alpha-val").textContent = parseFloat(e.target.value).toFixed(2);
 });
+
+/* ---------- TTS 操作历史 ---------- */
+/* 历史按 modelId 维度记录，仅当前选中模型 category=="tts" 时显示该区块。
+   加载时机：TTS 面板渲染（renderTtsPanel）、激活实例变化（见 updateInstanceBar /
+   instance-select onchange）、合成成功（tts-submit 成功分支）、手动刷新。 */
+function historyModelId() {
+  const m = selectedModel();
+  return m && m.category === "tts" ? m.id : null;
+}
+
+async function loadHistory() {
+  const block = $("history-sidebar");
+  const modelId = historyModelId();
+  if (!modelId) {
+    block.classList.add("hidden");
+    $("history-fab").classList.add("hidden");
+    closeHistoryDrawer();
+    return;
+  }
+  block.classList.remove("hidden");
+  $("history-fab").classList.remove("hidden");
+  const list = $("history-list");
+  let items;
+  try {
+    const res = await fetch("/api/history/" + modelId);
+    const text = await res.text();
+    if (!res.ok) throw new Error(I18N.errText(text));
+    items = JSON.parse(text);
+  } catch (e) {
+    list.innerHTML = "";
+    list.appendChild(el(`<div class="hint history-empty">${t("history.listFailed") + t("common.colon") + e.message}</div>`));
+    return;
+  }
+  renderHistoryList(items);
+}
+
+function renderHistoryList(items) {
+  const list = $("history-list");
+  list.innerHTML = "";
+  if (!items.length) {
+    list.appendChild(el(`<div class="hint history-empty">${t("history.empty")}</div>`));
+    return;
+  }
+  for (const item of items) list.appendChild(makeHistoryRow(item));
+}
+
+/* 单行历史：信息行（时间 / 文本预览 / 时长与大小 / 按钮）+ 成功行内播放与下载；失败行红字显示 error */
+function makeHistoryRow(item) {
+  const audioUrl = "/api/history/" + selectedModelId + "/" + item.taskId + "/audio";
+  const row = el(`<div class="history-row${item.ok ? "" : " failed"}">
+    <div class="history-info">
+      <span class="history-time"></span>
+      <span class="history-text"></span>
+      <span class="history-meta"></span>
+      <span class="history-btns">
+        <button type="button" class="history-load"></button>
+        <button type="button" class="history-del stop-btn"></button>
+      </span>
+    </div>
+  </div>`);
+  const timeEl = row.querySelector(".history-time");
+  timeEl.textContent = new Date(item.time).toLocaleString();
+  const textEl = row.querySelector(".history-text");
+  textEl.textContent = item.text || t("history.noText");
+  if (item.text) textEl.title = item.text;
+  const meta = [];
+  if (item.ok && item.result) {
+    if (item.result.durationSec != null) meta.push(item.result.durationSec.toFixed(1) + "s");
+    if (item.result.size != null) meta.push(WavUtil.formatSize(item.result.size));
+  }
+  if (item.instanceName) meta.push(item.instanceName);
+  row.querySelector(".history-meta").textContent = meta.join(" ｜ ");
+  if (!item.ok) {
+    const err = el(`<div class="error-text history-error"></div>`);
+    err.textContent = item.error || t("history.failedBadge");
+    if (item.error) err.title = item.error;
+    row.appendChild(err);
+  } else {
+    // 音频直接引用后端流接口（不进 base64），preload=none 避免一次性拉取全部 wav
+    const player = el(`<div class="history-player">
+      <audio controls preload="none"></audio>
+      <a class="btn-ghost" download></a>
+    </div>`);
+    player.querySelector("audio").src = audioUrl;
+    const a = player.querySelector("a");
+    a.textContent = t("history.download");
+    a.href = audioUrl;
+    a.download = "tts-" + item.taskId + ".wav";
+    row.appendChild(player);
+  }
+  const loadBtn = row.querySelector(".history-load");
+  loadBtn.textContent = t("history.load");
+  loadBtn.onclick = () => loadHistoryRecord(item.taskId);
+  const delBtn = row.querySelector(".history-del");
+  delBtn.textContent = t("history.delete");
+  delBtn.onclick = () => deleteHistoryItem(item.taskId);
+  return row;
+}
+
+async function deleteHistoryItem(taskId) {
+  const modelId = historyModelId();
+  if (!modelId) return;
+  try {
+    const res = await fetch("/api/history/" + modelId + "/" + taskId, { method: "DELETE" });
+    if (!res.ok) throw new Error(I18N.errText(await res.text()));
+    loadHistory();
+  } catch (e) {
+    showToast("error", t("history.deleteFailed") + t("common.colon") + e.message);
+  }
+}
+
+$("history-refresh").onclick = loadHistory;
+
+$("history-clear").onclick = async () => {
+  const modelId = historyModelId();
+  if (!modelId || !window.confirm(t("history.confirmClear"))) return;
+  try {
+    const res = await fetch("/api/history/" + modelId, { method: "DELETE" });
+    if (!res.ok) throw new Error(I18N.errText(await res.text()));
+    loadHistory();
+  } catch (e) {
+    showToast("error", t("history.clearFailed") + t("common.colon") + e.message);
+  }
+};
+
+/* "载入"：拉取单条完整记录回填 TTS 表单（提交组装 / collectParams 的逆操作） */
+async function loadHistoryRecord(taskId) {
+  const modelId = historyModelId();
+  const m = selectedModel();
+  if (!modelId || !m) return;
+  let rec;
+  try {
+    const res = await fetch("/api/history/" + modelId + "/" + taskId);
+    const text = await res.text();
+    if (!res.ok) throw new Error(I18N.errText(text));
+    rec = JSON.parse(text);
+  } catch (e) {
+    showToast("error", t("history.loadFailed") + t("common.colon") + e.message);
+    return;
+  }
+  fillTtsForm(m, rec);
+  showToast("info", t("history.loaded"));
+}
+
+function fillTtsForm(m, rec) {
+  $("tts-text").value = rec.text || "";
+  if (rec.language && ttsLanguageSel &&
+      [...ttsLanguageSel.options].some(o => o.value === rec.language)) {
+    ttsLanguageSel.value = rec.language;
+  }
+
+  const voice = rec.voice || { kind: "default" };
+  if (m.family === "qwen3_tts") {
+    // 按声音来源还原变体选择（speaker→CustomVoice，instruct→VoiceDesign，其余→Base）
+    const variantSel = $("tts-variant");
+    const variant = voice.kind === "speaker" ? "custom_voice"
+      : voice.kind === "instruct" ? "voice_design" : "base";
+    if (variantSel) {
+      variantSel.value = variant;
+      ttsVariant = variant;
+      updateTtsBlocks(m);
+    }
+    if (voice.kind === "speaker" && voice.speaker) {
+      const spk = $("tts-spk-speaker");
+      if (spk) spk.value = voice.speaker;
+    }
+  }
+  if (voice.kind === "voice_ref" && voice.voiceRef) {
+    // voice_ref 是服务器路径：AudioPicker 没有对外设值接口，
+    // 切到"本地路径"页签填入路径并探测（与手动粘贴路径等价，失败时仅提示不透传）
+    setPickerPath(voicePicker, voice.voiceRef);
+  }
+  const rtInput = $("tts-reference-text");
+  if (rtInput) rtInput.value = voice.referenceText || "";
+  const insInput = $("tts-instruct");
+  if (insInput) insInput.value = voice.instruct || "";
+
+  applyHistoryOptions(m, rec.options || {});
+}
+
+/* options 里的参数填回 paramSchema 渲染的控件：高级参数网格（adv- 前缀）+ 枚举行 */
+function applyHistoryOptions(m, options) {
+  for (const [key, p] of schemaParams(m)) {
+    const input = $("adv-" + key);
+    if (!input || options[key] === undefined) continue;
+    if (p.type === "boolean") { input.checked = !!options[key]; continue; }
+    input.value = String(options[key]);
+  }
+  const s = m.paramSchema || {};
+  for (const [key, p] of Object.entries(s)) {
+    if (!p || Array.isArray(p) || p.type !== "enum" || ["language", "speaker"].includes(key)) continue;
+    const sel = $(`tts-enum-${key}`);
+    if (sel && options[key] !== undefined) sel.value = String(options[key]);
+  }
+}
+
+/* AudioPicker 无对外设值接口：切到"本地路径"页签，填入服务器路径并探测 */
+function setPickerPath(picker, path) {
+  const tab = picker.root.querySelector('.picker-tab[data-tab="path"]');
+  if (tab) tab.click();
+  picker.$(".path-input").value = path;
+  picker.probePath();
+}
 
 /* ---------- ASR 面板 ---------- */
 function renderAsrPanel(m) {

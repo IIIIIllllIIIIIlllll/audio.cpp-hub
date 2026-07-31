@@ -137,12 +137,28 @@
         </div>
       </div>
     </section>
+
+    <!-- 右栏：操作历史侧边栏（按 modelId 记录，仅 TTS 模型显示；窄屏变为抽屉式弹出） -->
+    <aside id="history-sidebar" class="hidden">
+      <div class="history-header">
+        <span class="history-title" data-i18n="history.title">操作历史</span>
+        <div class="history-actions">
+          <button id="history-refresh" type="button" class="btn-ghost" data-i18n="history.refresh">刷新</button>
+          <button id="history-clear" type="button" class="stop-btn" data-i18n="history.clear">清空</button>
+          <button id="history-close" type="button" class="theme-btn" data-i18n-title="history.closeTitle" title="关闭">×</button>
+        </div>
+      </div>
+      <div id="history-list"></div>
+    </aside>
   </main>
 
   <footer class="hint" data-i18n="footer.hint">提示：音频可上传 / 录制 / 从音色库选择，也可填写运行 hub 的机器上的本机路径。</footer>
   <div id="toast-root"></div>
   <!-- 移动端抽屉遮罩：点击收起左侧模型/实例菜单 -->
   <div id="drawer-overlay" class="drawer-overlay hidden"></div>
+  <!-- 窄屏历史抽屉：右下角悬浮按钮 + 遮罩 -->
+  <button id="history-fab" class="theme-btn hidden" data-i18n-title="history.fabTitle" title="操作历史">🕘</button>
+  <div id="history-overlay" class="drawer-overlay hidden"></div>
 
   <!-- 启动模型 modal -->
   <div id="launch-modal" class="modal-overlay hidden">

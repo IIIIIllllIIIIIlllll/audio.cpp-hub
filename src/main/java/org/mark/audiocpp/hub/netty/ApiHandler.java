@@ -4,12 +4,19 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.handler.codec.http.DefaultHttpContent;
+import io.netty.handler.codec.http.DefaultHttpResponse;
 import io.netty.handler.codec.http.FullHttpRequest;
+import io.netty.handler.codec.http.HttpHeaderNames;
+import io.netty.handler.codec.http.HttpHeaderValues;
 import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpResponseStatus;
+import io.netty.handler.codec.http.HttpUtil;
 import io.netty.handler.codec.http.HttpVersion;
+import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.handler.codec.http.QueryStringDecoder;
 import io.netty.util.CharsetUtil;
 import org.mark.audiocpp.hub.AudioHubServer;
@@ -19,6 +26,8 @@ import org.mark.audiocpp.hub.cert.CertManager;
 import org.mark.audiocpp.hub.config.ExecutableRegistry;
 import org.mark.audiocpp.hub.config.ProfileRegistry;
 import org.mark.audiocpp.hub.fs.FileSystemBrowser;
+import org.mark.audiocpp.hub.history.HistoryAudioExtractor;
+import org.mark.audiocpp.hub.history.HistoryManager;
 import org.mark.audiocpp.hub.instance.InstanceManager;
 import org.mark.audiocpp.hub.instance.ModelInstance;
 import org.mark.audiocpp.hub.proxy.SpeechForwarder;
@@ -29,11 +38,16 @@ import org.mark.audiocpp.hub.util.WeightsPaths;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.BufferedInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * API 路由。处理不了的 GET 请求透传给 StaticFileHandler。
@@ -48,6 +62,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
     private final SpeechForwarder speechForwarder = new SpeechForwarder();
     private final VoiceLibrary voiceLibrary = new VoiceLibrary();
     private final FileSystemBrowser fileSystemBrowser = new FileSystemBrowser();
+    private final HistoryManager historyManager = new HistoryManager();
 
     public ApiHandler(InstanceManager instanceManager, ExecutableRegistry executableRegistry,
                       ProfileRegistry profileRegistry) {
@@ -134,6 +149,8 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         } else if (method.equals(HttpMethod.POST) && path.startsWith("/api/run/")) {
             String instanceId = path.substring("/api/run/".length());
             handleRun(ctx, request, instanceId);
+        } else if (path.startsWith("/api/history/")) {
+            handleHistory(ctx, request, method, path.substring("/api/history/".length()));
         } else if (method.equals(HttpMethod.POST) && path.equals("/api/audio/upload")) {
             handleAudioUpload(ctx, request);
         } else if (method.equals(HttpMethod.POST) && path.equals("/api/audio/info")) {
@@ -429,6 +446,11 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         }
         // 同步阻塞转发：Netty worker 线程会被占住，但并发量极小（本地单用户工具），可接受
         try {
+            if (isTts(instance)) {
+                // TTS 走流式链路：响应落盘 → 提取音频进历史 → 文件流式回写，大 base64 不进堆
+                handleRunTts(ctx, request, instance, body);
+                return;
+            }
             String result = speechForwarder.forward(instance, body);
             sendJson(ctx, HttpResponseStatus.OK, result, request);
         } catch (InterruptedException e) {
@@ -438,6 +460,160 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         } catch (Exception e) {
             log.warn("任务转发失败: {}", e.getMessage());
             sendJson(ctx, HttpResponseStatus.BAD_GATEWAY, errorJson(e), request);
+        }
+    }
+
+    /** 实例是否 TTS 模型（models.json 的 category）。 */
+    private boolean isTts(ModelInstance instance) {
+        JsonObject model = ModelRegistry.findById(instance.getModelId());
+        return model != null && model.has("category") && "tts".equals(model.get("category").getAsString());
+    }
+
+    /**
+     * TTS 任务：响应落盘临时文件 → 流式提取 audio 写成 data/history/<modelId>/<taskId>.wav →
+     * 记录历史 → 临时文件流式回写给前端（完成后删除）。大 base64 全程不进堆。
+     */
+    private void handleRunTts(ChannelHandlerContext ctx, FullHttpRequest request, ModelInstance instance,
+                              JsonObject body) {
+        String modelId = instance.getModelId();
+        String taskId = UUID.randomUUID().toString().substring(0, 8);
+        Path tmp;
+        try {
+            tmp = historyManager.tempResponsePath(modelId, taskId);
+        } catch (IOException e) {
+            log.warn("历史目录不可用: {}", e.getMessage());
+            sendJson(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR,
+                    Jsons.error("HISTORY_IO", null, "历史目录不可用: " + e.getMessage()), request);
+            return;
+        }
+        try {
+            speechForwarder.forwardToFile(instance, body, tmp);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            deleteQuietly(tmp);
+            sendJson(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR,
+                    Jsons.error("FORWARD_INTERRUPTED", null, "转发被中断"), request);
+            return;
+        } catch (Exception e) {
+            log.warn("TTS 任务转发失败: {}", e.getMessage());
+            historyManager.recordTts(instance, body, taskId, null, e.getMessage());
+            deleteQuietly(tmp);
+            sendJson(ctx, HttpResponseStatus.BAD_GATEWAY, errorJson(e), request);
+            return;
+        }
+        // 提取结果音频并解析 WAV 头（时长/采样率进历史元数据）
+        JsonObject result = null;
+        String error = null;
+        Path wav = historyManager.wavPath(modelId, taskId);
+        try {
+            HistoryAudioExtractor.Result extracted = HistoryAudioExtractor.extract(tmp, wav);
+            if (extracted.audioFound()) {
+                AudioStore.WavInfo info = AudioStore.parseWav(wav);
+                result = new JsonObject();
+                result.addProperty("file", taskId + ".wav");
+                result.addProperty("size", Files.size(wav));
+                result.addProperty("durationSec", Math.round(info.durationSec * 1000.0) / 1000.0);
+                result.addProperty("sampleRate", info.sampleRate);
+                result.addProperty("channels", info.channels);
+            } else {
+                error = "响应中未找到音频数据";
+            }
+        } catch (Exception e) {
+            log.warn("TTS 结果音频提取失败: {}", e.getMessage());
+            error = "结果音频提取失败: " + Jsons.summarize(e.getMessage());
+            deleteQuietly(wav);
+        }
+        historyManager.recordTts(instance, body, taskId, result, error);
+        // 响应 JSON 原样回写前端（分块流式，写完删临时文件）
+        sendFileChunked(ctx, HttpResponseStatus.OK, "application/json; charset=utf-8", tmp, request, true);
+    }
+
+    /** 操作历史路由：路径段 <modelId>[/<taskId>[/audio]]，GET 列表/详情/音频，DELETE 单删/清空。 */
+    private void handleHistory(ChannelHandlerContext ctx, FullHttpRequest request, HttpMethod method,
+                               String rest) throws Exception {
+        String[] parts = rest.split("/");
+        String modelId = parts[0];
+        String taskId = parts.length > 1 ? parts[1] : null;
+        boolean audio = parts.length > 2 && "audio".equals(parts[2]);
+        if (method.equals(HttpMethod.GET) && taskId == null) {
+            sendJson(ctx, HttpResponseStatus.OK, historyManager.list(modelId).toString(), request);
+        } else if (method.equals(HttpMethod.GET) && audio) {
+            Path wav = historyManager.audioPath(modelId, taskId);
+            if (wav == null) {
+                sendJson(ctx, HttpResponseStatus.NOT_FOUND,
+                        Jsons.error("HISTORY_NOT_FOUND", null, "历史音频不存在"), request);
+                return;
+            }
+            sendFileChunked(ctx, HttpResponseStatus.OK, "audio/wav", wav, request, false);
+        } else if (method.equals(HttpMethod.GET)) {
+            JsonObject rec = historyManager.get(modelId, taskId);
+            if (rec == null) {
+                sendJson(ctx, HttpResponseStatus.NOT_FOUND,
+                        Jsons.error("HISTORY_NOT_FOUND", null, "历史记录不存在"), request);
+                return;
+            }
+            sendJson(ctx, HttpResponseStatus.OK, rec.toString(), request);
+        } else if (method.equals(HttpMethod.DELETE) && taskId != null) {
+            if (historyManager.delete(modelId, taskId)) {
+                sendJson(ctx, HttpResponseStatus.OK, Jsons.ok(Map.of("taskId", taskId)), request);
+            } else {
+                sendJson(ctx, HttpResponseStatus.NOT_FOUND,
+                        Jsons.error("HISTORY_NOT_FOUND", null, "历史记录不存在"), request);
+            }
+        } else if (method.equals(HttpMethod.DELETE)) {
+            historyManager.clear(modelId);
+            sendJson(ctx, HttpResponseStatus.OK, Jsons.ok(Map.of("modelId", modelId)), request);
+        } else {
+            sendJson(ctx, HttpResponseStatus.NOT_FOUND,
+                    Jsons.error("UNKNOWN_API", Map.of("path", request.uri()), "unknown api: " + request.uri()),
+                    request);
+        }
+    }
+
+    /**
+     * 文件分块回写（chunked，避免整文件进堆）；deleteAfter 在写出完成后删除文件。
+     * 在 eventLoop 上同步读文件，与 handleRun 的阻塞转发同款取舍（本地单用户）。
+     */
+    private void sendFileChunked(ChannelHandlerContext ctx, HttpResponseStatus status, String contentType,
+                                 Path file, FullHttpRequest request, boolean deleteAfter) {
+        boolean keepAlive = HttpUtil.isKeepAlive(request);
+        DefaultHttpResponse head = new DefaultHttpResponse(HttpVersion.HTTP_1_1, status);
+        head.headers().set(HttpHeaderNames.CONTENT_TYPE, contentType);
+        head.headers().set(HttpHeaderNames.TRANSFER_ENCODING, HttpHeaderValues.CHUNKED);
+        head.headers().set(HttpHeaderNames.CACHE_CONTROL, "no-cache");
+        head.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+        if (!keepAlive) {
+            head.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE);
+        }
+        ctx.write(head);
+        try (InputStream in = new BufferedInputStream(Files.newInputStream(file), 64 * 1024)) {
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) >= 0) {
+                ctx.write(new DefaultHttpContent(Unpooled.wrappedBuffer(Arrays.copyOf(buf, n))));
+            }
+        } catch (IOException e) {
+            log.warn("文件回写中断: {}", e.getMessage());
+            if (deleteAfter) {
+                deleteQuietly(file);
+            }
+            ctx.close();
+            return;
+        }
+        ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT).addListener(f -> {
+            if (deleteAfter) {
+                deleteQuietly(file);
+            }
+            if (!keepAlive) {
+                ctx.close();
+            }
+        });
+    }
+
+    private void deleteQuietly(Path file) {
+        try {
+            Files.deleteIfExists(file);
+        } catch (IOException ignored) {
         }
     }
 
