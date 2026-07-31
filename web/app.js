@@ -1027,7 +1027,8 @@ function paramInput(key, p, prefix) {
     return el(`<label class="checkbox-label"><input type="checkbox" id="${prefix}-${key}" ${p.default ? "checked" : ""}> ${key}</label>`);
   }
   if (p.type === "string") {
-    return el(`<label>${key}<input type="text" id="${prefix}-${key}" value="${p.default ?? ""}"></label>`);
+    const ph = I18N.pick(p, "placeholder");
+    return el(`<label>${key}<input type="text" id="${prefix}-${key}" value="${p.default ?? ""}"${ph ? ` placeholder="${ph}"` : ""}></label>`);
   }
   if (p.type === "enum") {
     const label = el(`<label>${key}<select id="${prefix}-${key}"></select></label>`);
@@ -1142,6 +1143,8 @@ function renderTtsPanel(m) {
   $("tts-advanced").classList.toggle("hidden", !hasAdvanced);
 
   updateTtsBlocks(m);
+  // VibeVoice 多说话人交互：每个说话人一行 "Speaker N: ..."，占位提示替用户说明格式
+  $("tts-text").placeholder = m.family === "vibevoice" ? t("tts.textPlaceholderVibevoice") : t("tts.textPlaceholder");
   $("tts-result").classList.add("hidden");
   $("tts-msg").textContent = "";
   $("tts-stats").textContent = "";
@@ -1202,6 +1205,11 @@ $("tts-submit").onclick = async () => {
       const v = voicePicker.getValue();
       if (voiceRefMode === "required" && !v) { msg.textContent = t("tts.errNoVoice"); return; }
       if (v) req.voice_ref = v;
+    }
+    // VibeVoice：voice_samples（多说话人）与单个参考音色互斥，前端先拦一道（引擎侧同样会报错）
+    if (m.family === "vibevoice" && req.voice_ref) {
+      const vs = $("adv-voice_samples");
+      if (vs && vs.value.trim()) { msg.textContent = t("tts.errVibevoiceVoiceConflict"); return; }
     }
     const rt = $("tts-reference-text");
     if (rt && rt.value.trim()) req.reference_text = rt.value.trim();

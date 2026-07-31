@@ -313,6 +313,31 @@
     }
   },
   {
+    "id": "vibevoice",
+    "family": "vibevoice",
+    "hfUrl": "https://huggingface.co/microsoft/VibeVoice-1.5B",
+    "ggufUrl": "https://huggingface.co/audio-cpp/audio.cpp-gguf/tree/main/VibeVoice-1.5B-GGUF",
+    "displayName": "VibeVoice 1.5B",
+    "displayNameEn": "VibeVoice 1.5B",
+    "description": "VibeVoice 1.5B 长文语音合成，最多 4 说话人：文本按 Speaker N: 分行，多音色用 voice_samples（逗号分隔 wav，≤4），单音色用参考音频克隆，输出 24kHz。",
+    "descriptionEn": "VibeVoice 1.5B long-form TTS with up to 4 speakers: one 'Speaker N:' line per speaker, multiple voices via voice_samples (comma-separated wavs, <=4), single-voice cloning from a reference audio, outputs 24kHz.",
+    "category": "tts",
+    "serverTask": "tts",
+    "modes": ["offline"],
+    "inputs": { "text": "required", "audio": "none", "voiceRef": "optional" },
+    "outputType": "audio",
+    "paramSchema": {
+      "voice_samples": { "type": "string", "default": "", "placeholder": "多说话人：逗号分隔的本地 wav 路径（≤4），用此项时勿选参考音色", "placeholderEn": "Multi-speaker: comma-separated local wav paths (<=4); leave the reference voice unselected when using this" },
+      "num_inference_steps": { "type": "integer", "default": 10, "min": 1, "max": 100, "step": 1 },
+      "guidance_scale": { "type": "number", "default": 1.3, "min": 0.0, "max": 5.0, "step": 0.1 },
+      "max_length_times": { "type": "number", "default": 2.0, "min": 0.1, "max": 10.0, "step": 0.1 },
+      "temperature": { "type": "number", "default": 1.0, "min": 0.05, "max": 2.0, "step": 0.05 },
+      "top_p": { "type": "number", "default": 1.0, "min": 0.05, "max": 1.0, "step": 0.01 },
+      "do_sample": { "type": "boolean", "default": false },
+      "seed": { "type": "integer", "default": null, "min": 0, "max": 2147483647, "step": 1 }
+    }
+  },
+  {
     "id": "qwen3_tts",
     "family": "qwen3_tts",
     "hfUrl": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-Base",

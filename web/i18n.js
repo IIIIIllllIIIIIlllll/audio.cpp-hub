@@ -75,6 +75,8 @@ window.I18N = (() => {
     "tts.errNoVoice": "请选择说话人参考音频",
     "tts.errNoInstruct": "请填写 VoiceDesign 声音设计指令",
     "tts.errOmnivoiceRef": "OmniVoice 使用参考音频克隆时必须填写参考文本（参考音频的转写）",
+    "tts.textPlaceholderVibevoice": "多说话人：每个说话人单独一行，如 Speaker 0: 你好… Speaker 1: 嗨…（不分行则按 Speaker 0 处理）",
+    "tts.errVibevoiceVoiceConflict": "voice_samples 与单个参考音色不能同时使用：多说话人时请只填 voice_samples，不要选择参考音色",
     "tts.errNoEmotionAudio": "请选择情感参考音频",
     "tts.noAudio": "响应中没有音频: ",
     /* ---------- 情感控制 ---------- */
@@ -427,6 +429,8 @@ window.I18N = (() => {
     "tts.errNoVoice": "Please select a speaker reference audio",
     "tts.errNoInstruct": "Please enter the VoiceDesign voice design instruction",
     "tts.errOmnivoiceRef": "OmniVoice requires the reference text (transcript of the reference audio) when cloning from reference audio",
+    "tts.textPlaceholderVibevoice": "Multi-speaker: one line per speaker, e.g. Speaker 0: Hello... Speaker 1: Hi... (a single line is treated as Speaker 0)",
+    "tts.errVibevoiceVoiceConflict": "voice_samples cannot be combined with a single reference voice: for multi-speaker keep only voice_samples and leave the reference voice unselected",
     "tts.errNoEmotionAudio": "Please select an emotion reference audio",
     "tts.noAudio": "No audio in response: ",
     /* ---------- emotion control ---------- */
