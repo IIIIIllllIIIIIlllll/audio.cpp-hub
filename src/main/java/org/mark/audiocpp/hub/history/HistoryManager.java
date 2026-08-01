@@ -40,6 +40,8 @@ public class HistoryManager {
 
     private static final int MAX_RECORDS_PER_MODEL = 50;
     private static final long MAX_BYTES_PER_MODEL = 500L * 1024 * 1024;
+    /** 列表接口的文本截断长度（完整文本走单条详情接口）。 */
+    private static final int LIST_TEXT_LIMIT = 100;
 
     /** modelId → 记录队列（队首最旧）。 */
     private final Map<String, Deque<JsonObject>> index = new HashMap<>();
@@ -139,7 +141,18 @@ public class HistoryManager {
             item.add("time", rec.get("time"));
             item.add("instanceName", rec.get("instanceName"));
             item.add("ok", rec.get("ok"));
-            item.add("text", rec.get("text"));
+            // 文本截断：列表只给概要，完整文本在单条详情里
+            if (rec.has("text") && rec.get("text").isJsonPrimitive()) {
+                String text = rec.get("text").getAsString();
+                if (text.length() > LIST_TEXT_LIMIT) {
+                    item.addProperty("text", text.substring(0, LIST_TEXT_LIMIT) + "…");
+                    item.addProperty("textTruncated", true);
+                } else {
+                    item.addProperty("text", text);
+                }
+            } else {
+                item.add("text", rec.get("text"));
+            }
             if (rec.has("error")) {
                 item.add("error", rec.get("error"));
             }

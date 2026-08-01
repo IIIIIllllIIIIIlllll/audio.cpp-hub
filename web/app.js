@@ -108,7 +108,9 @@ async function loadModels() {
   const res = await fetch("/api/models");
   models = await res.json();
   if (models.length && !selectedModelId) {
-    selectedModelId = models[0].id;
+    // 刷新后恢复上次选中的模型（否则回到第一个模型，其历史/实例视图会让用户误以为数据丢失）
+    const saved = localStorage.getItem("hub-model");
+    selectedModelId = models.some(m => m.id === saved) ? saved : models[0].id;
   }
   renderModelList();
   updateQuickLaunchTitle();
@@ -200,6 +202,7 @@ function renderModelList() {
       if (hfBtn) hfBtn.onclick = (e) => { e.stopPropagation(); toggleHfMenu(hfBtn, m); };
       card.onclick = () => {
         selectedModelId = m.id;
+        localStorage.setItem("hub-model", m.id);
         renderModelList();
         updateQuickLaunchTitle();
         restoreWeightsPath();
@@ -1404,12 +1407,26 @@ function makeHistoryRow(item) {
     if (item.error) err.title = item.error;
     row.appendChild(err);
   } else {
-    // 音频直接引用后端流接口（不进 base64），preload=none 避免一次性拉取全部 wav
+    // 懒加载：不预设 src，只有点击“播放”时才向后端拉取 wav 文件
     const player = el(`<div class="history-player">
-      <audio controls preload="none"></audio>
+      <button type="button" class="history-play btn-ghost"></button>
+      <audio controls preload="none" class="hidden"></audio>
       <a class="btn-ghost" download></a>
     </div>`);
-    player.querySelector("audio").src = audioUrl;
+    const audio = player.querySelector("audio");
+    const playBtn = player.querySelector(".history-play");
+    playBtn.textContent = t("history.play");
+    playBtn.onclick = () => {
+      if (!audio.src) {
+        audio.src = audioUrl;
+        audio.classList.remove("hidden");
+      }
+      if (audio.paused) audio.play();
+      else audio.pause();
+    };
+    audio.onplay = () => { playBtn.textContent = t("history.pause"); };
+    audio.onpause = () => { playBtn.textContent = t("history.play"); };
+    audio.onended = () => { playBtn.textContent = t("history.play"); };
     const a = player.querySelector("a");
     a.textContent = t("history.download");
     a.href = audioUrl;
