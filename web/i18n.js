@@ -251,7 +251,7 @@ window.I18N = (() => {
     /* ---------- 设置对话框 ---------- */
     "settings.title": "设置",
     "settings.nav.general": "通用",
-    "settings.nav.executables": "可执行文件",
+    "settings.nav.executables": "audio.cpp",
     "settings.nav.https": "HTTPS 证书",
     "settings.general.language": "界面语言",
     "settings.general.languageDesc": "切换界面显示语言，立即生效",
@@ -677,7 +677,7 @@ window.I18N = (() => {
     /* ---------- settings dialog ---------- */
     "settings.title": "Settings",
     "settings.nav.general": "General",
-    "settings.nav.executables": "Executables",
+    "settings.nav.executables": "audio.cpp",
     "settings.nav.https": "HTTPS Certificate",
     "settings.general.language": "Interface language",
     "settings.general.languageDesc": "Switch the display language, takes effect immediately",

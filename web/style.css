@@ -958,6 +958,11 @@ footer { padding: 4px 24px 18px; }
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--input-bg);
+  /* 内边距 + 行圆角：让 hover/选中高亮不顶到容器圆角，避免直角高亮在圆角处被裁切 */
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .fb-empty { padding: 18px 14px; margin: 0; }
 .fb-row {
@@ -968,8 +973,8 @@ footer { padding: 4px 24px 18px; }
   cursor: pointer;
   user-select: none;
   font-size: 13px;
+  border-radius: 6px;
 }
-.fb-row + .fb-row { border-top: 1px solid var(--border); }
 .fb-row:hover { background: var(--ring); }
 .fb-row.selected { background: var(--ring); box-shadow: inset 0 0 0 1px var(--accent); }
 .fb-icon { flex: none; width: 20px; text-align: center; }

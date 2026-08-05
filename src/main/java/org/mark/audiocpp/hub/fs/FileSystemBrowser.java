@@ -25,7 +25,7 @@ public class FileSystemBrowser {
     private static final DateTimeFormatter MTIME_FMT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault());
 
-    /** 根节点：Windows 为各盘符；其他系统为 /。始终附带用户主目录。 */
+    /** 根节点：Windows 为各盘符；其他系统为 /。始终附带用户主目录与程序根目录（hub 工作目录）。 */
     public JsonArray roots() {
         JsonArray roots = new JsonArray();
         boolean windows = System.getProperty("os.name", "").toLowerCase().contains("win");
@@ -42,6 +42,11 @@ public class FileSystemBrowser {
         String home = System.getProperty("user.home", "");
         if (!home.isEmpty() && Files.isDirectory(Path.of(home))) {
             roots.add(rootEntry("主目录", home));
+        }
+        // 程序根目录：hub 的工作目录，与主目录相同时不重复添加
+        String workDir = Path.of("").toAbsolutePath().normalize().toString();
+        if (!workDir.equals(home)) {
+            roots.add(rootEntry("程序根目录", workDir));
         }
         return roots;
     }
