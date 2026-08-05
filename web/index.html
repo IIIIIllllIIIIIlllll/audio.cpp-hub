@@ -233,6 +233,11 @@
         <button id="model-dl-modal-close" class="modal-close">×</button>
       </div>
       <div id="mdl-package-list" class="dl-packages"></div>
+      <label><span data-i18n="dl.endpointLabel">下载源</span><select id="mdl-endpoint">
+        <option value="" data-i18n="dl.endpointDefault">默认（跟随服务器配置）</option>
+        <option value="https://huggingface.co" data-i18n="dl.endpointHf">huggingface.co（官方）</option>
+        <option value="https://hf-mirror.com" data-i18n="dl.endpointMirror">hf-mirror.com（国内镜像）</option>
+      </select></label>
       <label><span data-i18n="dl.tokenLabel">HF token（gated 仓库需要，可选）</span><input id="mdl-token" type="text" data-i18n-placeholder="dl.tokenPlaceholder" placeholder="留空仅下载公开仓库"></label>
       <label class="checkbox-label"><input type="checkbox" id="mdl-overwrite"> <span data-i18n="dl.overwrite">覆盖已存在的文件（重新下载）</span></label>
       <button id="mdl-start" class="btn" data-i18n="dl.start">开始下载</button>

@@ -26,6 +26,7 @@ import org.mark.audiocpp.hub.cert.CertManager;
 import org.mark.audiocpp.hub.config.ExecutableRegistry;
 import org.mark.audiocpp.hub.config.ProfileRegistry;
 import org.mark.audiocpp.hub.download.DownloadManager;
+import org.mark.audiocpp.hub.download.DownloadTask;
 import org.mark.audiocpp.hub.fs.FileSystemBrowser;
 import org.mark.audiocpp.hub.history.HistoryAudioExtractor;
 import org.mark.audiocpp.hub.history.HistoryManager;
@@ -556,8 +557,9 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
 
     /**
      * 创建下载任务，两种形式：
-     * 1) {"modelId","packageId"?,"token"?,"overwrite"?} — 按 model-packages.json 清单生成文件列表
-     *    （packageId 缺省取 default 包；URL 用 hub.config.json 的 hfEndpoint 拼接）；
+     * 1) {"modelId","packageId"?,"token"?,"overwrite"?,"endpoint"?} — 按 model-packages.json 清单生成文件列表
+     *    （packageId 缺省取 default 包；URL 默认用 hub.config.json 的 hfEndpoint 拼接，
+     *    body 带 endpoint 时改用该下载源，仅 http/https）；
      * 2) {"targetDir","files":[{"url","path"},...],"token"?,"overwrite"?} — 显式文件列表。
      * 权重落盘 models/<targetDir>/，创建后自动开始，返回任务详情（含分段与进度）。
      */
@@ -599,10 +601,22 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
             targetDir = pkg.get("targetDir").getAsString();
             String repo = pkg.get("repo").getAsString();
             String revision = pkg.get("revision").getAsString();
+            // 下载源：body 可显式指定 endpoint 覆盖配置（去掉末尾斜杠，buildUrl 以 / 分段拼接）
+            String endpoint = optString(body, "endpoint");
+            String base = config.hfEndpoint;
+            if (endpoint != null && !endpoint.isEmpty()) {
+                try {
+                    base = DownloadTask.validateUrl(endpoint);
+                } catch (UserException e) {
+                    sendJson(ctx, HttpResponseStatus.BAD_REQUEST, errorJson(e), request);
+                    return;
+                }
+                while (base.endsWith("/")) base = base.substring(0, base.length() - 1);
+            }
             for (JsonElement el : pkg.getAsJsonArray("files")) {
                 JsonObject f = el.getAsJsonObject();
                 files.add(new DownloadManager.FileRequest(
-                        ModelPackageRegistry.buildUrl(config.hfEndpoint, repo, revision,
+                        ModelPackageRegistry.buildUrl(base, repo, revision,
                                 f.get("remote").getAsString()),
                         f.get("local").getAsString()));
             }
