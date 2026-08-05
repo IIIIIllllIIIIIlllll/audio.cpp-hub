@@ -8,6 +8,7 @@ import io.netty.handler.ssl.SslContext;
 import org.mark.audiocpp.hub.AudioHubServer;
 import org.mark.audiocpp.hub.config.ExecutableRegistry;
 import org.mark.audiocpp.hub.config.ProfileRegistry;
+import org.mark.audiocpp.hub.download.DownloadManager;
 import org.mark.audiocpp.hub.instance.InstanceManager;
 import org.mark.audiocpp.hub.proxy.V1ProxyHandler;
 
@@ -18,15 +19,17 @@ public class HttpServerInitializer extends ChannelInitializer<SocketChannel> {
     private final InstanceManager instanceManager;
     private final ExecutableRegistry executableRegistry;
     private final ProfileRegistry profileRegistry;
+    private final DownloadManager downloadManager;
     private final SslContext sslContext;
     private final AudioHubServer.HubConfig config;
 
     public HttpServerInitializer(InstanceManager instanceManager, ExecutableRegistry executableRegistry,
-                                 ProfileRegistry profileRegistry, SslContext sslContext,
-                                 AudioHubServer.HubConfig config) {
+                                 ProfileRegistry profileRegistry, DownloadManager downloadManager,
+                                 SslContext sslContext, AudioHubServer.HubConfig config) {
         this.instanceManager = instanceManager;
         this.executableRegistry = executableRegistry;
         this.profileRegistry = profileRegistry;
+        this.downloadManager = downloadManager;
         this.sslContext = sslContext;
         this.config = config;
     }
@@ -36,14 +39,14 @@ public class HttpServerInitializer extends ChannelInitializer<SocketChannel> {
         if (sslContext != null) {
             // HTTPS 已启用：统一端口探测协议，TLS 走 HTTPS，纯 HTTP 一律 308 跳转
             ch.pipeline().addLast(new HttpHttpsUnificationHandler(sslContext, config,
-                    instanceManager, executableRegistry, profileRegistry));
+                    instanceManager, executableRegistry, profileRegistry, downloadManager));
             return;
         }
         ch.pipeline()
                 .addLast(new HttpServerCodec())
                 .addLast(new V1ProxyHandler(instanceManager, config.proxyMaxBodyBytes))
                 .addLast(new HttpObjectAggregator(64 * 1024 * 1024))
-                .addLast(new ApiHandler(instanceManager, executableRegistry, profileRegistry))
+                .addLast(new ApiHandler(instanceManager, executableRegistry, profileRegistry, downloadManager, config))
                 .addLast(new StaticFileHandler());
     }
 }

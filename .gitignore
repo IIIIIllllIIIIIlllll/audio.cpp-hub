@@ -4,5 +4,6 @@
 /run/
 /data/
 /ssl/
+/models/
 /launcher/build/
 /releases/

@@ -11,6 +11,7 @@ import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.ssl.SslContext;
 import org.mark.audiocpp.hub.config.ExecutableRegistry;
 import org.mark.audiocpp.hub.config.ProfileRegistry;
+import org.mark.audiocpp.hub.download.DownloadManager;
 import org.mark.audiocpp.hub.instance.InstanceManager;
 import org.mark.audiocpp.hub.netty.HttpServerInitializer;
 import org.mark.audiocpp.hub.netty.HttpsSupport;
@@ -54,10 +55,12 @@ public class AudioHubServer {
         ExecutableRegistry executableRegistry = new ExecutableRegistry();
         ProfileRegistry profileRegistry = new ProfileRegistry();
         InstanceManager instanceManager = new InstanceManager(config);
-        // JVM 退出时停止所有子进程
+        DownloadManager downloadManager = new DownloadManager(config);
+        // JVM 退出时停止所有子进程，并让下载任务落盘后暂停（下次启动自动续传）
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log.info("收到退出信号，停止所有模型实例...");
             instanceManager.stopAll();
+            downloadManager.shutdown();
         }));
 
         EventLoopGroup boss = new NioEventLoopGroup(1);
@@ -73,7 +76,7 @@ public class AudioHubServer {
             bootstrap.group(boss, worker)
                     .channel(NioServerSocketChannel.class)
                     .childHandler(new HttpServerInitializer(instanceManager, executableRegistry,
-                            profileRegistry, sslContext, config));
+                            profileRegistry, downloadManager, sslContext, config));
             Channel channel = bootstrap.bind(config.httpPort).sync().channel();
             serverChannel = channel;
             log.info("audio.cpp-hub 已启动: {}://127.0.0.1:{}", sslContext != null ? "https" : "http", config.httpPort);
@@ -204,6 +207,10 @@ public class AudioHubServer {
                 if (obj.has("httpPort")) config.httpPort = obj.get("httpPort").getAsInt();
                 if (obj.has("instancePortBase")) config.instancePortBase = obj.get("instancePortBase").getAsInt();
                 if (obj.has("proxyMaxBodyBytes")) config.proxyMaxBodyBytes = obj.get("proxyMaxBodyBytes").getAsLong();
+                if (obj.has("modelsDir")) config.modelsDir = obj.get("modelsDir").getAsString();
+                if (obj.has("downloadThreads")) config.downloadThreads = obj.get("downloadThreads").getAsInt();
+                if (obj.has("downloadSegmentsPerFile")) config.downloadSegmentsPerFile = obj.get("downloadSegmentsPerFile").getAsInt();
+                if (obj.has("hfEndpoint")) config.hfEndpoint = obj.get("hfEndpoint").getAsString();
                 if (obj.has("https") && obj.get("https").isJsonObject()) {
                     JsonObject https = obj.getAsJsonObject("https");
                     if (https.has("enabled")) config.httpsEnabled = https.get("enabled").getAsBoolean();
@@ -273,6 +280,14 @@ public class AudioHubServer {
         public int instancePortBase = 18080;
         /** /v1/* 代理请求体落盘上限（默认 1GB），超限返回 413 */
         public long proxyMaxBodyBytes = 1024L * 1024 * 1024;
+        /** 模型权重下载根目录（相对工作目录或绝对路径） */
+        public String modelsDir = "models";
+        /** 下载分段 worker 全局线程池大小 */
+        public int downloadThreads = 8;
+        /** 单文件最大分段数（每分段一个 Range 连接） */
+        public int downloadSegmentsPerFile = 4;
+        /** HuggingFace 端点（不可直连时改为镜像，如 https://hf-mirror.com） */
+        public String hfEndpoint = "https://huggingface.co";
         public boolean httpsEnabled = false;
         public String httpsKeystorePath = "ssl/keystore.p12";
         public String httpsKeystorePassword = "changeit";

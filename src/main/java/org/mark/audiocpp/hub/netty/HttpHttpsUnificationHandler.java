@@ -6,6 +6,7 @@ import javax.net.ssl.SSLEngine;
 
 import org.mark.audiocpp.hub.config.ExecutableRegistry;
 import org.mark.audiocpp.hub.config.ProfileRegistry;
+import org.mark.audiocpp.hub.download.DownloadManager;
 import org.mark.audiocpp.hub.instance.InstanceManager;
 
 import io.netty.buffer.ByteBuf;
@@ -60,15 +61,17 @@ public class HttpHttpsUnificationHandler extends ByteToMessageDecoder {
     private final InstanceManager instanceManager;
     private final ExecutableRegistry executableRegistry;
     private final ProfileRegistry profileRegistry;
+    private final DownloadManager downloadManager;
 
     public HttpHttpsUnificationHandler(SslContext sslContext, AudioHubServer.HubConfig config,
             InstanceManager instanceManager, ExecutableRegistry executableRegistry,
-            ProfileRegistry profileRegistry) {
+            ProfileRegistry profileRegistry, DownloadManager downloadManager) {
         this.sslContext = sslContext;
         this.config = config;
         this.instanceManager = instanceManager;
         this.executableRegistry = executableRegistry;
         this.profileRegistry = profileRegistry;
+        this.downloadManager = downloadManager;
     }
 
     @Override
@@ -148,7 +151,7 @@ public class HttpHttpsUnificationHandler extends ByteToMessageDecoder {
         pipeline.addLast(new HttpServerCodec());
         pipeline.addLast(new V1ProxyHandler(instanceManager, config.proxyMaxBodyBytes));
         pipeline.addLast(new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
-        pipeline.addLast(new ApiHandler(instanceManager, executableRegistry, profileRegistry));
+        pipeline.addLast(new ApiHandler(instanceManager, executableRegistry, profileRegistry, downloadManager, config));
         pipeline.addLast(new StaticFileHandler());
     }
 }

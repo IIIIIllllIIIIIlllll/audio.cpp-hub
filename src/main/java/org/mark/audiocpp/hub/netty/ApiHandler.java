@@ -25,6 +25,7 @@ import org.mark.audiocpp.hub.audio.VoiceLibrary;
 import org.mark.audiocpp.hub.cert.CertManager;
 import org.mark.audiocpp.hub.config.ExecutableRegistry;
 import org.mark.audiocpp.hub.config.ProfileRegistry;
+import org.mark.audiocpp.hub.download.DownloadManager;
 import org.mark.audiocpp.hub.fs.FileSystemBrowser;
 import org.mark.audiocpp.hub.history.HistoryAudioExtractor;
 import org.mark.audiocpp.hub.history.HistoryManager;
@@ -32,6 +33,7 @@ import org.mark.audiocpp.hub.instance.InstanceManager;
 import org.mark.audiocpp.hub.instance.ModelInstance;
 import org.mark.audiocpp.hub.proxy.SpeechForwarder;
 import org.mark.audiocpp.hub.util.Jsons;
+import org.mark.audiocpp.hub.util.ModelPackageRegistry;
 import org.mark.audiocpp.hub.util.ModelRegistry;
 import org.mark.audiocpp.hub.util.UserException;
 import org.mark.audiocpp.hub.util.WeightsPaths;
@@ -43,6 +45,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -59,16 +62,21 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
     private final InstanceManager instanceManager;
     private final ExecutableRegistry executableRegistry;
     private final ProfileRegistry profileRegistry;
+    private final DownloadManager downloadManager;
+    private final AudioHubServer.HubConfig config;
     private final SpeechForwarder speechForwarder = new SpeechForwarder();
     private final VoiceLibrary voiceLibrary = new VoiceLibrary();
     private final FileSystemBrowser fileSystemBrowser = new FileSystemBrowser();
     private final HistoryManager historyManager = new HistoryManager();
 
     public ApiHandler(InstanceManager instanceManager, ExecutableRegistry executableRegistry,
-                      ProfileRegistry profileRegistry) {
+                      ProfileRegistry profileRegistry, DownloadManager downloadManager,
+                      AudioHubServer.HubConfig config) {
         this.instanceManager = instanceManager;
         this.executableRegistry = executableRegistry;
         this.profileRegistry = profileRegistry;
+        this.downloadManager = downloadManager;
+        this.config = config;
     }
 
     @Override
@@ -92,6 +100,18 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         String path = decoder.path();
         if (method.equals(HttpMethod.GET) && path.equals("/api/models")) {
             sendJson(ctx, HttpResponseStatus.OK, ModelRegistry.rawJson(), request);
+        } else if (method.equals(HttpMethod.GET) && path.startsWith("/api/models/")
+                && path.endsWith("/packages")) {
+            // 模型下载包清单：GET /api/models/<modelId>/packages
+            String modelId = path.substring("/api/models/".length(), path.length() - "/packages".length());
+            JsonObject family = ModelPackageRegistry.findByModel(modelId);
+            if (family == null) {
+                sendJson(ctx, HttpResponseStatus.NOT_FOUND,
+                        Jsons.error("MODEL_UNKNOWN", Map.of("modelId", modelId),
+                                "模型无下载清单: " + modelId), request);
+            } else {
+                sendJson(ctx, HttpResponseStatus.OK, family.toString(), request);
+            }
         } else if (method.equals(HttpMethod.GET) && path.equals("/api/instances")) {
             JsonArray array = new JsonArray();
             for (ModelInstance instance : instanceManager.list()) {
@@ -149,6 +169,12 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         } else if (method.equals(HttpMethod.POST) && path.startsWith("/api/run/")) {
             String instanceId = path.substring("/api/run/".length());
             handleRun(ctx, request, instanceId);
+        } else if (method.equals(HttpMethod.GET) && path.equals("/api/downloads")) {
+            sendJson(ctx, HttpResponseStatus.OK, downloadManager.list().toString(), request);
+        } else if (method.equals(HttpMethod.POST) && path.equals("/api/downloads")) {
+            handleDownloadCreate(ctx, request);
+        } else if (path.startsWith("/api/downloads/")) {
+            handleDownload(ctx, request, method, decoder, path.substring("/api/downloads/".length()));
         } else if (path.startsWith("/api/history/")) {
             handleHistory(ctx, request, method, path.substring("/api/history/".length()));
         } else if (method.equals(HttpMethod.POST) && path.equals("/api/audio/upload")) {
@@ -526,6 +552,119 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         historyManager.recordTts(instance, body, taskId, result, error);
         // 响应 JSON 原样回写前端（分块流式，写完删临时文件）
         sendFileChunked(ctx, HttpResponseStatus.OK, "application/json; charset=utf-8", tmp, request, true);
+    }
+
+    /**
+     * 创建下载任务，两种形式：
+     * 1) {"modelId","packageId"?,"token"?,"overwrite"?} — 按 model-packages.json 清单生成文件列表
+     *    （packageId 缺省取 default 包；URL 用 hub.config.json 的 hfEndpoint 拼接）；
+     * 2) {"targetDir","files":[{"url","path"},...],"token"?,"overwrite"?} — 显式文件列表。
+     * 权重落盘 models/<targetDir>/，创建后自动开始，返回任务详情（含分段与进度）。
+     */
+    private void handleDownloadCreate(ChannelHandlerContext ctx, FullHttpRequest request) {
+        JsonObject body;
+        try {
+            body = JsonParser.parseString(request.content().toString(CharsetUtil.UTF_8)).getAsJsonObject();
+        } catch (Exception e) {
+            sendJson(ctx, HttpResponseStatus.BAD_REQUEST,
+                    Jsons.error("INVALID_JSON", null, "请求体不是合法 JSON"), request);
+            return;
+        }
+        boolean overwrite = body.has("overwrite") && body.get("overwrite").isJsonPrimitive()
+                && body.get("overwrite").getAsBoolean();
+        String token = optString(body, "token");
+        String modelId = optString(body, "modelId");
+        String packageId = null;
+        String targetDir;
+        List<DownloadManager.FileRequest> files = new ArrayList<>();
+        if (modelId != null && !modelId.isEmpty()) {
+            JsonObject family = ModelPackageRegistry.findByModel(modelId);
+            if (family == null) {
+                sendJson(ctx, HttpResponseStatus.BAD_REQUEST,
+                        Jsons.error("MODEL_UNKNOWN", Map.of("modelId", modelId),
+                                "模型无下载清单: " + modelId), request);
+                return;
+            }
+            packageId = optString(body, "packageId");
+            JsonObject pkg = ModelPackageRegistry.resolvePackage(family, packageId);
+            if (pkg == null) {
+                sendJson(ctx, HttpResponseStatus.BAD_REQUEST,
+                        Jsons.error("PACKAGE_UNKNOWN", Map.of("modelId", modelId,
+                                        "packageId", String.valueOf(packageId)),
+                                "下载包不存在: " + packageId), request);
+                return;
+            }
+            // 记录解析后的包 id（body 未指定时即 default 包）
+            packageId = pkg.get("id").getAsString();
+            targetDir = pkg.get("targetDir").getAsString();
+            String repo = pkg.get("repo").getAsString();
+            String revision = pkg.get("revision").getAsString();
+            for (JsonElement el : pkg.getAsJsonArray("files")) {
+                JsonObject f = el.getAsJsonObject();
+                files.add(new DownloadManager.FileRequest(
+                        ModelPackageRegistry.buildUrl(config.hfEndpoint, repo, revision,
+                                f.get("remote").getAsString()),
+                        f.get("local").getAsString()));
+            }
+        } else {
+            targetDir = optString(body, "targetDir");
+            if (!body.has("files") || !body.get("files").isJsonArray()
+                    || body.getAsJsonArray("files").size() == 0) {
+                sendJson(ctx, HttpResponseStatus.BAD_REQUEST,
+                        Jsons.error("FILES_REQUIRED", null, "files 不能为空"), request);
+                return;
+            }
+            for (JsonElement el : body.getAsJsonArray("files")) {
+                if (el.isJsonObject()) {
+                    JsonObject f = el.getAsJsonObject();
+                    files.add(new DownloadManager.FileRequest(optString(f, "url"), optString(f, "path")));
+                }
+            }
+        }
+        try {
+            JsonObject task = downloadManager.create(targetDir, files, token, overwrite, modelId, packageId);
+            sendJson(ctx, HttpResponseStatus.OK, task.toString(), request);
+        } catch (Exception e) {
+            if (e instanceof UserException) {
+                sendJson(ctx, HttpResponseStatus.BAD_REQUEST, errorJson(e), request);
+            } else {
+                log.error("创建下载任务失败", e);
+                sendJson(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, errorJson(e), request);
+            }
+        }
+    }
+
+    /** 下载任务路由：/api/downloads/<id>[/pause|/resume]，GET 详情，DELETE 取消（?purge=true 清理 .part 残留）。 */
+    private void handleDownload(ChannelHandlerContext ctx, FullHttpRequest request, HttpMethod method,
+                                QueryStringDecoder decoder, String rest) {
+        String[] parts = rest.split("/");
+        String id = parts[0];
+        String action = parts.length > 1 ? parts[1] : null;
+        try {
+            if (method.equals(HttpMethod.GET) && action == null) {
+                sendJson(ctx, HttpResponseStatus.OK, downloadManager.get(id).toString(), request);
+            } else if (method.equals(HttpMethod.POST) && "pause".equals(action)) {
+                downloadManager.pause(id);
+                sendJson(ctx, HttpResponseStatus.OK, Jsons.ok(Map.of("id", id)), request);
+            } else if (method.equals(HttpMethod.POST) && "resume".equals(action)) {
+                downloadManager.resume(id);
+                sendJson(ctx, HttpResponseStatus.OK, Jsons.ok(Map.of("id", id)), request);
+            } else if (method.equals(HttpMethod.DELETE) && action == null) {
+                downloadManager.delete(id, "true".equalsIgnoreCase(firstParam(decoder, "purge")));
+                sendJson(ctx, HttpResponseStatus.OK, Jsons.ok(Map.of("id", id)), request);
+            } else {
+                sendJson(ctx, HttpResponseStatus.NOT_FOUND,
+                        Jsons.error("UNKNOWN_API", Map.of("path", request.uri()), "unknown api: " + request.uri()),
+                        request);
+            }
+        } catch (UserException e) {
+            HttpResponseStatus status = "DOWNLOAD_NOT_FOUND".equals(e.getCode())
+                    ? HttpResponseStatus.NOT_FOUND : HttpResponseStatus.BAD_REQUEST;
+            sendJson(ctx, status, errorJson(e), request);
+        } catch (Exception e) {
+            log.error("下载任务操作失败", e);
+            sendJson(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, errorJson(e), request);
+        }
     }
 
     /** 操作历史路由：路径段 <modelId>[/<taskId>[/audio]]，GET 列表/详情/音频，DELETE 单删/清空。 */

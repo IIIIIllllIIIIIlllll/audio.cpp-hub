@@ -16,6 +16,7 @@
       <span class="subtitle" data-i18n="header.subtitle">audiocpp_server 进程管理 &amp; 音频工作台</span>
     </div>
     <div class="header-actions">
+      <button id="downloads-btn" class="theme-btn" data-i18n-title="dl.managerTitle" title="下载管理">⬇️<span id="dl-badge" class="dl-badge hidden">0</span></button>
       <button id="lang-toggle" class="theme-btn" data-i18n-title="header.langTitle" title="切换语言 / Switch language">EN</button>
       <button id="settings-btn" class="theme-btn" data-i18n-title="header.settingsTitle" title="可执行文件设置">⚙️</button>
       <button id="theme-toggle" class="theme-btn" data-i18n-title="header.themeTitle" title="切换主题">☀️</button>
@@ -47,10 +48,18 @@
         <!-- TTS 面板 -->
         <div class="card panel-card" id="panel-tts">
           <h2 id="tts-title">语音合成</h2>
-          <label><span data-i18n="tts.textLabel">合成文本</span><textarea id="tts-text" rows="4" data-i18n-placeholder="tts.textPlaceholder" placeholder="要合成的文本"></textarea></label>
+          <label id="tts-text-block"><span data-i18n="tts.textLabel">合成文本</span><textarea id="tts-text" rows="4" data-i18n-placeholder="tts.textPlaceholder" placeholder="要合成的文本"></textarea></label>
           <div id="tts-language-row"></div>
           <div id="tts-variant-row"></div>
           <div id="tts-voice-block"><div id="voice-picker"></div></div>
+          <div id="tts-speakers-block" class="hidden">
+            <div class="speakers-head">
+              <span data-i18n="tts.speakersLabel">说话人</span>
+              <button type="button" id="tts-speaker-add" class="btn-ghost" data-i18n="tts.speakerAdd">添加说话人</button>
+            </div>
+            <div id="tts-speakers-list"></div>
+            <div class="hint" data-i18n="tts.speakersHint">每个说话人填写各自台词（每行一句），可单独设定音色；合成时按行号轮流拼接成对话。</div>
+          </div>
           <div id="tts-speaker-row"></div>
           <div id="tts-instruct-row"></div>
           <div id="tts-ref-text-row"></div>
@@ -202,6 +211,32 @@
       </div>
       <button id="launch-btn" class="btn" data-i18n="launch.submit">启动</button>
       <div id="launch-msg" class="msg"></div>
+    </div>
+  </div>
+
+  <!-- 下载管理 modal：任务列表 + 进度 + 暂停/续传/删除 -->
+  <div id="downloads-modal" class="modal-overlay hidden">
+    <div class="modal settings-modal">
+      <div class="modal-header">
+        <span class="modal-title" data-i18n="dl.managerTitle">下载管理</span>
+        <button id="downloads-modal-close" class="modal-close">×</button>
+      </div>
+      <div id="dl-list" class="dl-list"></div>
+    </div>
+  </div>
+
+  <!-- 模型下载 modal：下载包选择 + token + 覆盖选项 -->
+  <div id="model-dl-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title"><span data-i18n="dl.title">下载权重</span> — <span id="mdl-dl-model"></span></span>
+        <button id="model-dl-modal-close" class="modal-close">×</button>
+      </div>
+      <div id="mdl-package-list" class="dl-packages"></div>
+      <label><span data-i18n="dl.tokenLabel">HF token（gated 仓库需要，可选）</span><input id="mdl-token" type="text" data-i18n-placeholder="dl.tokenPlaceholder" placeholder="留空仅下载公开仓库"></label>
+      <label class="checkbox-label"><input type="checkbox" id="mdl-overwrite"> <span data-i18n="dl.overwrite">覆盖已存在的文件（重新下载）</span></label>
+      <button id="mdl-start" class="btn" data-i18n="dl.start">开始下载</button>
+      <div id="mdl-msg" class="msg"></div>
     </div>
   </div>
 

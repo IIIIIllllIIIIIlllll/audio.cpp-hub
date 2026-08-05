@@ -11,6 +11,7 @@ audio.cpp-hub 是 [audio.cpp](https://github.com/0xShug0/audio.cpp) 的 Web 管�
 - 操作历史（TTS）：按 modelId 隔离到 `data/history/<modelId>/`（`index.jsonl` 一行一条记录只追加 + `<taskId>.wav` 结果音频），内存索引启动时回放重建，每模型上限 50 条 / 500MB 超出淘汰最旧。API：`GET /api/history/<modelId>`（简要列表，新→旧，text 截断 100 字并带 `textTruncated` 标记）、`GET /api/history/<modelId>/<taskId>`（完整记录）、`GET /api/history/<modelId>/<taskId>/audio`（流式回 wav）、`DELETE /api/history/<modelId>[/<taskId>]`（清空 / 单删）。前端为右侧边栏（窄屏抽屉式弹出），音频懒加载（点击播放才拉取 wav）；界面记住上次选中的模型（localStorage `hub-model`），刷新后历史视图不丢
 - OpenAI 兼容代理：`GET /v1/models` 列出全部 READY 实例的服务名；`POST /v1/*`（如 `/v1/audio/speech`）由 `V1ProxyHandler` 接收——请求体分块落盘到 `run/proxy-cache/`（上限 `hub.config.json` 的 `proxyMaxBodyBytes`，默认 1GB），流式扫描提取顶层 `"model"` 后按服务名路由，路径与 body 原样 `ofFile` 转发到实例同名接口，响应分块流式回写；大 base64 全程不进 JVM 堆。错误体为 OpenAI 风格 `{"error":{"message","type"}}`
 - 实例服务名（instanceName）：启动时可显式指定（默认 modelId），是 `/v1/*` 的路由键，也写进实例 server.json 的 model id（实例自校验一致）；全局唯一，重名拒绝启动
+- 模型权重下载：`POST /api/downloads` 创建任务（创建即开始），两种 body：按模型 `{"modelId","packageId"?,"token"?,"overwrite"?}`（`packageId` 缺省取清单 default 包，URL 按 `hfEndpoint` 配置拼接）或显式 `{"targetDir","files":[{url,path}],...}`。`DownloadManager` 用 JDK `java.net.http.HttpClient` 多线程 Range 分段下载到 `models/<targetDir>/`（先写 `<file>.part`，完成校验后改名）；`GET /api/downloads`（列表 + percent/speedBps）、`GET /api/downloads/<id>`（详情含分段）、`POST /api/downloads/<id>/pause|resume`（暂停/续传）、`DELETE /api/downloads/<id>?purge=`（取消，purge 清理 .part）。任务状态落盘 `data/downloads/<id>/task.json`（原子写，~1s 节流），hub 重启后未完成任务自动从分段断点续传；gated 仓库传 `token`（HF token，明文存 task.json，API 输出会剔除）；下载前并行 HEAD 探测大小/Range 能力并做磁盘空间预检，不支持 Range 的文件退化为整流下载（中断后该文件重下）。下载包清单在 `resources/model-packages.json`（由 audio.cpp 的 model_specs 转换，覆盖全部 42 个模型，含未收录进 models.json 的），查询接口 `GET /api/models/<modelId>/packages`。相关配置：`modelsDir`（默认 `models`）、`downloadThreads`（默认 8）、`downloadSegmentsPerFile`（默认 4，分段最小粒度 32MB）、`hfEndpoint`（默认 `https://huggingface.co`，不可直连时改镜像如 `https://hf-mirror.com`）。前端：模型卡片有 ⬇ 按钮打开「下载权重」弹窗（包选择/token/覆盖），页头 ⬇️ 按钮（带进行中任务数角标）打开「下载管理」面板（进度条、暂停/续传/删除，2s 轮询），DONE 任务可一键把 `models/<targetDir>` 填入启动表单权重路径
 
 ## 技术栈
 
@@ -41,6 +42,10 @@ src/main/java/org/mark/audiocpp/hub/
 ├── history/              # 操作历史（TTS）：HistoryManager（按 modelId 隔离的记录索引、JSONL 追加落盘、
 │                         # 数量/容量双上限淘汰、data/history/<modelId>/ 布局）、
 │                         # HistoryAudioExtractor（流式扫描响应 JSON 提取 "audio"，base64 边扫边解码写 wav）
+├── download/             # 模型权重下载器：DownloadManager（JDK HttpClient 多线程 Range 分段、断点续传、
+│                         # 进度/速率统计、任务状态原子落盘 data/downloads/<id>/task.json、启动自动续传、
+│                         # HF token；单例，由 AudioHubServer 创建并注入 ApiHandler）、
+│                         # DownloadTask（任务/文件/分段数据模型，Gson 直接序列化，含路径/URL 校验）
 ├── config/               # ExecutableRegistry（executables.json：audiocpp_server 可执行文件登记，条目可带 env 环境变量表，
 │                         # 拉起子进程时注入，值支持 ${VAR} 占位符按 hub 进程环境展开；支持 PUT /api/executables/<id> 更新）、
 │                         # ProfileRegistry（data/profiles.json：模型启动配置档案）
@@ -48,10 +53,14 @@ src/main/java/org/mark/audiocpp/hub/
 │                         # VoiceLibrary（data/voices 音色库）
 ├── fs/                   # FileSystemBrowser：服务器本地文件浏览 API（/api/fs/*）
 ├── util/                 # Jsons（Gson 封装与错误 JSON）、UserException（带 code/params 的用户可读异常）、
-│                         # ModelRegistry（加载 resources/models.json 模型清单）
+│                         # ModelRegistry（加载 resources/models.json 模型清单）、
+│                         # ModelPackageRegistry（加载 resources/model-packages.json 下载包清单、
+│                         # 默认包选择、HF resolve URL 逐段编码构造）
 └── win/                  # WindowsTray（系统托盘）、AutoStartManager（注册表开机自启）
 src/main/resources/
 ├── models.json           # 支持模型清单（id/category/serverTask/paramSchema 等），GET /api/models 直接返回
+├── model-packages.json   # 模型下载包清单（由 audio.cpp model_specs 转换：repo/revision/targetDir/files/default/gated），
+│                         # GET /api/models/<id>/packages 返回，POST /api/downloads 按 modelId 消费
 ├── log4j2.xml            # 日志：按 MDC modelId 路由到 logs/<id>.log，否则 logs/app.log；按天滚动、保留 7 天
 └── icon/icon.png
 web/                      # 前端静态文件（无构建步骤）
@@ -59,7 +68,7 @@ launcher/                 # C 启动器（CMakeLists.txt + launcher.c + launcher
 lib/                      # 本地依赖 jar（pom 与 launcher.conf 都直接引用）
 ```
 
-运行时（相对工作目录）产生的数据，均被 `.gitignore` 排除：`logs/`、`run/<instanceId>/`（server.json + server.log，停止后自动清理）、`data/`（uploads/、voices/、profiles.json、history/<modelId>/ 操作历史）、`ssl/`（HTTPS 证书）、`build/`（javac 输出）、`executables.json`、`hub.config.json`。
+运行时（相对工作目录）产生的数据，均被 `.gitignore` 排除：`logs/`、`run/<instanceId>/`（server.json + server.log，停止后自动清理）、`data/`（uploads/、voices/、profiles.json、history/<modelId>/ 操作历史、downloads/<taskId>/ 下载任务状态）、`models/`（下载的模型权重）、`ssl/`（HTTPS 证书）、`build/`（javac 输出）、`executables.json`、`hub.config.json`。
 
 ## HTTPS
 
@@ -128,6 +137,6 @@ cmake --build launcher/build --config Release
 ## 安全注意事项
 
 - 这是**局域网/本机工具，无鉴权、无 HTTPS，不具备公网防护能力**。不要把端口直接暴露到公网（发布说明中已明确警告）；远程访问请走反向代理 + HTTPS
-- 防路径穿越的现有约定：文件名 id 一律用正则 `[a-zA-Z0-9-]{1,32}` 校验后再拼路径（见 `AudioStore.SAFE_ID`）；历史的 modelId/taskId 键用 `[a-zA-Z0-9_-]{1,64}`（多放行下划线，见 `HistoryManager.SAFE_KEY`）；静态文件解析后强制校验 `resolved.startsWith(WEB_ROOT)`。新增任何接收路径/文件名的接口必须沿用同样的校验
+- 防路径穿越的现有约定：文件名 id 一律用正则 `[a-zA-Z0-9-]{1,32}` 校验后再拼路径（见 `AudioStore.SAFE_ID`）；历史的 modelId/taskId 键用 `[a-zA-Z0-9_-]{1,64}`（多放行下划线，见 `HistoryManager.SAFE_KEY`）；下载的 targetDir 用 `[a-zA-Z0-9._-]{1,64}` 且必须含字母数字、文件相对路径逐段拒绝 `..`/绝对路径/盘符（见 `DownloadTask.validateTargetDir/validateFilePath`）；静态文件解析后强制校验 `resolved.startsWith(WEB_ROOT)`。新增任何接收路径/文件名的接口必须沿用同样的校验
 - `/api/fs/*` 接口有意暴露服务器本地文件系统浏览（用于选择模型权重路径），这是设计使然，但再次说明不能暴露公网
 - 上传限制：WAV 上限 50MB；Netty 聚合器上限 64MB

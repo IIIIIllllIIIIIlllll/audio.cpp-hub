@@ -34,6 +34,9 @@ let ttsLanguageSel = null;
 let asrLanguageSel = null;
 let otherLanguageSel = null;
 let ttsAudioUrl = null;
+/* VibeVoice 多说话人：每行一个 AudioPicker，第 N 行对应脚本里的 Speaker N（voice_samples 顺序） */
+let speakerPickers = [];
+const VIBEVOICE_MAX_SPEAKERS = 4;
 
 const $ = (id) => document.getElementById(id);
 const el = (html) => {
@@ -74,6 +77,8 @@ function rerenderAll() {
     syncGeneralPane();
     if (lastCertStatus) renderCertStatus(lastCertStatus);
   }
+  if (!$("downloads-modal").classList.contains("hidden")) renderDownloadList();
+  if (!$("model-dl-modal").classList.contains("hidden") && mdlPackages) renderMdlPackages();
   (window.__audioPickers || []).forEach(p => p.refreshLabels && p.refreshLabels());
   if (window.FileBrowser && FileBrowser.relocalize) FileBrowser.relocalize();
 }
@@ -194,10 +199,11 @@ function renderModelList() {
       const usable = modelConfigured(m);
       const card = document.createElement("div");
       card.className = "card" + (m.id === selectedModelId ? " selected" : "") + (usable ? "" : " unconfigured");
-      card.innerHTML = `<div class="card-title">${I18N.pick(m, "displayName")}${usable ? "" : ` <span class="badge unconfigured">${t("model.unconfigured")}</span>`}${m.hfUrl ? `<button class="hf-link" title="${t("model.hfRepo")}">HF ▾</button>` : ""}</div>
+      card.innerHTML = `<div class="card-title">${I18N.pick(m, "displayName")}${usable ? "" : ` <span class="badge unconfigured">${t("model.unconfigured")}</span>`}<button class="dl-link" title="${t("dl.cardBtn")}">⬇</button>${m.hfUrl ? `<button class="hf-link" title="${t("model.hfRepo")}">HF ▾</button>` : ""}</div>
         <div class="card-family">${m.family} <span class="cat-badge cat-${cat}">${categoryName(cat)}</span></div>
         <div class="card-desc">${I18N.pick(m, "description")}</div>`;
       if (!usable) card.title = t("model.unconfiguredTip");
+      card.querySelector(".dl-link").onclick = (e) => { e.stopPropagation(); openModelDlModal(m); };
       const hfBtn = card.querySelector(".hf-link");
       if (hfBtn) hfBtn.onclick = (e) => { e.stopPropagation(); toggleHfMenu(hfBtn, m); };
       card.onclick = () => {
@@ -435,6 +441,8 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     closeSettingsModal();
     closeLaunchModal();
+    closeDownloadsModal();
+    closeModelDlModal();
     closeDrawer();
   }
 });
@@ -900,6 +908,202 @@ $("instance-stop").onclick = async () => {
   refreshInstances();
 };
 
+/* ---------- 下载管理（任务列表 + 模型下载弹窗） ---------- */
+let downloads = [];
+let mdlPackages = null;
+let mdlModel = null;
+
+function fmtBytes(n) {
+  if (n == null || n < 0) return "?";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let v = n, i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return (i === 0 ? v : v.toFixed(1)) + " " + units[i];
+}
+
+const DL_STATUS_CLASS = { RUNNING: "starting", PENDING: "starting", PAUSED: "stopped", DONE: "ready", FAILED: "error" };
+
+async function refreshDownloads() {
+  try {
+    const res = await fetch("/api/downloads");
+    downloads = await res.json();
+  } catch (e) {
+    return;
+  }
+  updateDlBadge();
+  if (!$("downloads-modal").classList.contains("hidden")) renderDownloadList();
+}
+
+/* 页头角标：进行中的任务数 */
+function updateDlBadge() {
+  const running = downloads.filter(d => d.status === "RUNNING" || d.status === "PENDING").length;
+  const badge = $("dl-badge");
+  badge.textContent = running;
+  badge.classList.toggle("hidden", running === 0);
+}
+
+function openDownloadsModal() {
+  renderDownloadList();
+  $("downloads-modal").classList.remove("hidden");
+}
+function closeDownloadsModal() {
+  $("downloads-modal").classList.add("hidden");
+}
+$("downloads-btn").onclick = openDownloadsModal;
+$("downloads-modal-close").onclick = closeDownloadsModal;
+$("downloads-modal").onclick = (e) => { if (e.target === $("downloads-modal")) closeDownloadsModal(); };
+
+function renderDownloadList() {
+  const list = $("dl-list");
+  list.innerHTML = "";
+  if (downloads.length === 0) {
+    list.innerHTML = `<div class="hint exec-empty">${t("dl.empty")}</div>`;
+    return;
+  }
+  for (const d of downloads) {
+    const model = d.modelId ? models.find(m => m.id === d.modelId) : null;
+    const title = model ? I18N.pick(model, "displayName") : d.targetDir;
+    const pct = d.percent;
+    const row = document.createElement("div");
+    row.className = "dl-row";
+    let html = `<div class="dl-row-head">
+      <span class="dl-row-title">${title} <span class="dl-row-dir">models/${d.targetDir}</span></span>
+      <span class="badge ${DL_STATUS_CLASS[d.status] || "stopped"}">${t("dl.status." + d.status)}</span>
+    </div>
+    <div class="dl-progress"><div class="dl-progress-fill${pct < 0 ? " indeterminate" : ""}" style="width:${pct < 0 ? 100 : pct}%"></div></div>
+    <div class="dl-row-meta">${fmtBytes(d.downloadedBytes)} / ${fmtBytes(d.totalBytes)}${pct >= 0 ? ` ｜ ${pct}%` : ""}${d.status === "RUNNING" && d.speedBps > 0 ? ` ｜ ${fmtBytes(d.speedBps)}/s` : ""} ｜ ${t("dl.fileProgress", { done: d.completedFiles, n: d.fileCount })}</div>`;
+    if (d.status === "FAILED" && d.error) {
+      html += `<div class="error-text">${d.error}</div>`;
+    }
+    html += `<div class="card-actions">`;
+    if (d.status === "RUNNING" || d.status === "PENDING") {
+      html += `<button class="stop-btn dl-act" data-act="pause">${t("dl.pause")}</button>`;
+    }
+    if (d.status === "PAUSED" || d.status === "FAILED") {
+      html += `<button class="stop-btn dl-act" data-act="resume">${t(d.status === "FAILED" ? "dl.retry" : "dl.resume")}</button>`;
+    }
+    if (d.status === "DONE" && d.modelId) {
+      html += `<button class="stop-btn dl-fill">${t("dl.fillWeights")}</button>`;
+    }
+    html += `<button class="stop-btn dl-del">${t("dl.delete")}</button></div>`;
+    row.innerHTML = html;
+    for (const btn of row.querySelectorAll(".dl-act")) {
+      btn.onclick = async () => {
+        const res = await fetch(`/api/downloads/${d.id}/${btn.dataset.act}`, { method: "POST" });
+        if (!res.ok) showToast("error", I18N.errText(await res.text()));
+        refreshDownloads();
+      };
+    }
+    const fillBtn = row.querySelector(".dl-fill");
+    if (fillBtn) {
+      fillBtn.onclick = () => {
+        const path = "models/" + d.targetDir;
+        localStorage.setItem("hub-weights-" + d.modelId, path);
+        if (selectedModelId === d.modelId) $("launch-weights").value = path;
+        showToast("info", t("dl.weightsFilled", { path }));
+      };
+    }
+    row.querySelector(".dl-del").onclick = async () => {
+      if (!window.confirm(t("dl.confirmDelete"))) return;
+      const res = await fetch(`/api/downloads/${d.id}?purge=true`, { method: "DELETE" });
+      if (!res.ok) showToast("error", I18N.errText(await res.text()));
+      refreshDownloads();
+    };
+    list.appendChild(row);
+  }
+}
+
+/* 模型下载弹窗：包选择 + token + 覆盖 */
+function openModelDlModal(m) {
+  mdlModel = m;
+  mdlPackages = null;
+  $("mdl-dl-model").textContent = I18N.pick(m, "displayName");
+  $("mdl-msg").textContent = "";
+  $("mdl-package-list").innerHTML = `<div class="hint">${t("dl.loading")}</div>`;
+  $("model-dl-modal").classList.remove("hidden");
+  loadMdlPackages(m);
+}
+function closeModelDlModal() {
+  $("model-dl-modal").classList.add("hidden");
+}
+$("model-dl-modal-close").onclick = closeModelDlModal;
+$("model-dl-modal").onclick = (e) => { if (e.target === $("model-dl-modal")) closeModelDlModal(); };
+
+async function loadMdlPackages(m) {
+  try {
+    const res = await fetch(`/api/models/${m.id}/packages`);
+    const text = await res.text();
+    if (!res.ok) throw new Error(I18N.errText(text));
+    mdlPackages = JSON.parse(text);
+    renderMdlPackages();
+  } catch (e) {
+    $("mdl-package-list").innerHTML = `<div class="hint">${t("dl.loadFailed")}${t("common.colon")}${e.message}</div>`;
+  }
+}
+
+function renderMdlPackages() {
+  const c = $("mdl-package-list");
+  c.innerHTML = "";
+  const pkgs = (mdlPackages && mdlPackages.packages) || [];
+  if (pkgs.length === 0) {
+    c.innerHTML = `<div class="hint">${t("dl.noPackages")}</div>`;
+    return;
+  }
+  pkgs.forEach((p, i) => {
+    const row = el(`<label class="dl-package-row">
+      <input type="radio" name="mdl-package" value="${p.id}"${p.default || (!pkgs.some(x => x.default) && i === 0) ? " checked" : ""}>
+      <span class="dl-package-text">
+        <span class="dl-package-name"></span>
+        <span class="dl-package-meta">${[p.format, p.precision].filter(Boolean).join(" ｜ ")} → models/${p.targetDir} ｜ ${t("dl.fileCount", { n: p.files.length })}</span>
+      </span>
+    </label>`);
+    const name = row.querySelector(".dl-package-name");
+    name.textContent = p.displayName || p.id;
+    if (p.default) name.appendChild(el(` <span class="badge ready">${t("dl.recommended")}</span>`));
+    if (p.gated) name.appendChild(el(` <span class="badge stopped">gated</span>`));
+    c.appendChild(row);
+  });
+}
+
+$("mdl-start").onclick = async () => {
+  const msg = $("mdl-msg");
+  msg.textContent = "";
+  const sel = document.querySelector('input[name="mdl-package"]:checked');
+  if (!sel || !mdlModel) {
+    msg.textContent = t("dl.noPackages");
+    return;
+  }
+  const body = {
+    modelId: mdlModel.id,
+    packageId: sel.value,
+    overwrite: $("mdl-overwrite").checked
+  };
+  const token = $("mdl-token").value.trim();
+  if (token) body.token = token;
+  const btn = $("mdl-start");
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/downloads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      msg.textContent = t("dl.startFailed") + t("common.colon") + I18N.errText(text);
+      return;
+    }
+    closeModelDlModal();
+    showToast("info", t("dl.started"));
+    await refreshDownloads();
+    openDownloadsModal();
+  } catch (e) {
+    msg.textContent = t("dl.startFailed") + t("common.colon") + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+};
+
 /* ---------- 事件通知（toast） ---------- */
 let eventsInitialized = false;
 const seenEvents = new Set();
@@ -1119,6 +1323,95 @@ function buildTextRow(container, m, key, labelText, id) {
   return false;
 }
 
+/* ---------- VibeVoice 多说话人块 ---------- */
+/* 行号即 Speaker 编号：每个说话人一个元素，内含台词框（每行一句）+ 音色选择器。
+   提交时按行号轮流把各说话人的台词拼成 Speaker N: 脚本，音色按行序拼成 voice_samples。 */
+function clearSpeakerRows() {
+  for (const sp of speakerPickers) {
+    const idx = (window.__audioPickers || []).indexOf(sp.picker);
+    if (idx >= 0) window.__audioPickers.splice(idx, 1);
+    sp.row.remove();
+  }
+  speakerPickers = [];
+}
+
+function renumberSpeakerRows() {
+  speakerPickers.forEach((sp, i) => {
+    const n = i + 1;
+    sp.label.textContent = "Speaker " + n;
+    sp.picker.titleKey = "Speaker " + n;
+    sp.picker.$(".picker-title").textContent = "Speaker " + n;
+  });
+  $("tts-speaker-add").disabled = speakerPickers.length >= VIBEVOICE_MAX_SPEAKERS;
+}
+
+function addSpeakerRow(path) {
+  if (speakerPickers.length >= VIBEVOICE_MAX_SPEAKERS) return;
+  const n = speakerPickers.length + 1;
+  const row = el(`<details class="speaker-row"${n === 1 ? " open" : ""}>
+    <summary><span class="speaker-label">Speaker ${n}</span>
+      <span class="speaker-actions">
+        <button type="button" class="btn-ghost speaker-remove"></button>
+      </span>
+    </summary>
+    <textarea class="speaker-lines" rows="2"></textarea>
+    <div class="speaker-picker-mount"></div>
+  </details>`);
+  const removeBtn = row.querySelector(".speaker-remove");
+  const linesTa = row.querySelector(".speaker-lines");
+  removeBtn.textContent = t("tts.speakerRemove");
+  linesTa.placeholder = t("tts.speakerLinesPlaceholder");
+  removeBtn.onclick = () => {
+    const i = speakerPickers.findIndex(sp => sp.row === row);
+    if (i < 0) return;
+    const idx = (window.__audioPickers || []).indexOf(speakerPickers[i].picker);
+    if (idx >= 0) window.__audioPickers.splice(idx, 1);
+    speakerPickers.splice(i, 1);
+    row.remove();
+    if (!speakerPickers.length) addSpeakerRow();
+    renumberSpeakerRows();
+  };
+  // summary 里的按钮不应触发 details 折叠
+  row.querySelector(".speaker-actions").onclick = (e) => e.stopPropagation();
+  row.querySelector(".speaker-actions").addEventListener("click", (e) => e.preventDefault());
+  const picker = new AudioPicker(row.querySelector(".speaker-picker-mount"), "Speaker " + n);
+  $("tts-speakers-list").appendChild(row);
+  speakerPickers.push({ picker, row, label: row.querySelector(".speaker-label"), removeBtn, linesTa });
+  renumberSpeakerRows();
+  if (path) setPickerPath(picker, path);
+}
+
+function renderSpeakersBlock(m) {
+  const show = m.family === "vibevoice";
+  $("tts-speakers-block").classList.toggle("hidden", !show);
+  // VibeVoice 的脚本由各说话人行内的台词框组装，主文本框不使用
+  $("tts-text-block").classList.toggle("hidden", show);
+  // 语言切换等重渲染会重建本区块：先快照已填的音色与台词，重建后还原
+  const saved = speakerPickers.map(sp => ({ path: sp.picker.getValue(), lines: sp.linesTa.value }));
+  clearSpeakerRows();
+  if (!show) return;
+  if (!saved.length) { addSpeakerRow(); return; }
+  for (const s of saved.slice(0, VIBEVOICE_MAX_SPEAKERS)) {
+    addSpeakerRow(s.path);
+    speakerPickers[speakerPickers.length - 1].linesTa.value = s.lines;
+  }
+}
+
+$("tts-speaker-add").onclick = () => addSpeakerRow();
+
+/* 各说话人台词按行号轮流拼接：所有人的第 1 句 → 第 2 句 → …，空行跳过 */
+function buildVibeVoiceScript() {
+  const per = speakerPickers.map(sp => sp.linesTa.value.split("\n").map(s => s.trim()).filter(Boolean));
+  const maxLen = Math.max(0, ...per.map(a => a.length));
+  const out = [];
+  for (let k = 0; k < maxLen; k++) {
+    for (let i = 0; i < per.length; i++) {
+      if (per[i][k]) out.push("Speaker " + (i + 1) + ": " + per[i][k]);
+    }
+  }
+  return out.join("\n");
+}
+
 /* ---------- TTS 面板 ---------- */
 function renderTtsPanel(m) {
   $("tts-title").textContent = t("tts.title") + " — " + I18N.pick(m, "displayName");
@@ -1159,12 +1452,13 @@ function renderTtsPanel(m) {
 
   $("tts-emotion-block").classList.toggle("hidden", !(m.paramSchema && m.paramSchema.emotionModes));
 
+  renderSpeakersBlock(m);
+
   const hasAdvanced = renderAdvancedGrid($("tts-advanced-grid"), m, "adv");
   $("tts-advanced").classList.toggle("hidden", !hasAdvanced);
 
   updateTtsBlocks(m);
-  // VibeVoice 多说话人交互：每个说话人一行 "Speaker N: ..."，占位提示替用户说明格式
-  $("tts-text").placeholder = m.family === "vibevoice" ? t("tts.textPlaceholderVibevoice") : t("tts.textPlaceholder");
+  $("tts-text").placeholder = t("tts.textPlaceholder");
   $("tts-result").classList.add("hidden");
   $("tts-msg").textContent = "";
   $("tts-stats").textContent = "";
@@ -1199,7 +1493,8 @@ $("tts-submit").onclick = async () => {
   if (!activeInstanceId) { msg.textContent = t("instance.noReady"); return; }
 
   const req = {};
-  req.text = $("tts-text").value;
+  // VibeVoice 的脚本由各说话人台词框组装；其它模型用主文本框
+  req.text = m.family === "vibevoice" ? buildVibeVoiceScript() : $("tts-text").value;
   if (!req.text.trim()) { msg.textContent = t("tts.errNoText"); return; }
   if (ttsLanguageSel && ttsLanguageSel.value) req.language = ttsLanguageSel.value;
 
@@ -1227,10 +1522,28 @@ $("tts-submit").onclick = async () => {
       if (voiceRefMode === "required" && !v) { msg.textContent = t("tts.errNoVoice"); return; }
       if (v) req.voice_ref = v;
     }
-    // VibeVoice：voice_samples（多说话人）与单个参考音色互斥，前端先拦一道（引擎侧同样会报错）
-    if (m.family === "vibevoice" && req.voice_ref) {
-      const vs = $("adv-voice_samples");
-      if (vs && vs.value.trim()) { msg.textContent = t("tts.errVibevoiceVoiceConflict"); return; }
+    // VibeVoice 多说话人：音色按行序拼成 voice_samples，中间不能有空洞
+    // （引擎按下标映射 Speaker 编号，空洞会导致映射错位）
+    if (m.family === "vibevoice") {
+      const vals = speakerPickers.map(sp => sp.picker.getValue());
+      let last = -1;
+      vals.forEach((v, i) => { if (v) last = i; });
+      if (last >= 0) {
+        for (let i = 0; i <= last; i++) {
+          if (!vals[i]) { msg.textContent = t("tts.errVibevoiceGap", { n: i + 1 }); return; }
+        }
+        // 脚本引用的最大 Speaker 编号（引擎按最小编号归一化：min>0 时整体减 1）
+        let minId = Infinity, maxId = 0;
+        for (const mm of req.text.matchAll(/^Speaker\s+(\d+)\s*:/gim)) {
+          const id = parseInt(mm[1], 10);
+          if (id < minId) minId = id;
+          if (id > maxId) maxId = id;
+        }
+        const need = maxId > 0 ? (minId > 0 ? maxId : maxId + 1) : 0;
+        if (need > last + 1) { msg.textContent = t("tts.errVibevoiceNeedVoices", { n: need }); return; }
+        const opts = req.options || (req.options = {});
+        opts.voice_samples = vals.slice(0, last + 1).join(",");
+      }
     }
     const rt = $("tts-reference-text");
     if (rt && rt.value.trim()) req.reference_text = rt.value.trim();
@@ -1521,6 +1834,28 @@ function fillTtsForm(m, rec) {
   if (insInput) insInput.value = voice.instruct || "";
 
   applyHistoryOptions(m, rec.options || {});
+
+  // VibeVoice：voice_samples 按顺序填回各行音色（本地路径页签 + 探测，与手动粘贴等价），
+  // 脚本里的 Speaker N: 行按编号分发回各行台词框（0 起编号上移 1；无 Speaker 行的旧记录整段归入 Speaker 1）
+  if (m.family === "vibevoice") {
+    const paths = rec.options && rec.options.voice_samples
+      ? String(rec.options.voice_samples).split(",").map(s => s.trim()).filter(Boolean)
+      : [];
+    const lines = [];
+    for (const mm of String(rec.text || "").matchAll(/^Speaker\s+(\d+)\s*:\s*(.*)$/gim)) {
+      lines.push({ id: parseInt(mm[1], 10), text: mm[2] });
+    }
+    const minId = lines.length ? Math.min(...lines.map(x => x.id)) : 1;
+    const shift = lines.length && minId === 0 ? 1 : 0;
+    const maxRow = Math.max(1, paths.length, ...lines.map(x => x.id + shift));
+    clearSpeakerRows();
+    for (let i = 0; i < maxRow; i++) addSpeakerRow(paths[i]);
+    for (const x of lines) {
+      const sp = speakerPickers[x.id + shift - 1];
+      if (sp) sp.linesTa.value = (sp.linesTa.value ? sp.linesTa.value + "\n" : "") + x.text;
+    }
+    if (!lines.length && rec.text && speakerPickers[0]) speakerPickers[0].linesTa.value = rec.text;
+  }
 }
 
 /* options 里的参数填回 paramSchema 渲染的控件：高级参数网格（adv- 前缀）+ 枚举行 */
@@ -1797,7 +2132,9 @@ loadExecutables();
 loadProfiles();
 refreshInstances();
 refreshEvents();
+refreshDownloads();
 setInterval(() => {
   refreshInstances();
   refreshEvents();
+  refreshDownloads();
 }, 2000);
