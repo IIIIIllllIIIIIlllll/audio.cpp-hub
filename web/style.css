@@ -1093,6 +1093,9 @@ footer { padding: 4px 24px 18px; }
 /* ---------- TTS 操作历史（右侧边栏） ---------- */
 #history-sidebar {
   flex: 0 0 320px;
+  /* 必须显式归零：flex item 默认 min-width:auto，长文本（尤其无空格英文/URL）的
+     min-content 宽度会把侧栏撑过 320px，导致宽度随文本不断增长 */
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
