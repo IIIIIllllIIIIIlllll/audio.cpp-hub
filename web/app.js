@@ -1591,6 +1591,8 @@ $("tts-submit").onclick = async () => {
     const json = await runTask(req);
     if (!json.audio) {
       msg.textContent = t("tts.noAudio") + JSON.stringify(json).substring(0, 300);
+      // 失败记录后端已落盘，刷新侧栏让其即时可见
+      loadHistory();
       return;
     }
     // 替换前回收上一次的 objectURL，避免每次合成泄漏一个 Blob
@@ -1605,6 +1607,8 @@ $("tts-submit").onclick = async () => {
     loadHistory();
   } catch (e) {
     msg.textContent = t("common.failedElapsed", { verb: t("tts.verb"), t: fmtElapsed(start), msg: e.message });
+    // 引擎侧失败（非 200 / 响应无法解析）后端同样记录了失败历史，刷新侧栏
+    loadHistory();
   } finally {
     hideBusy();
     btn.disabled = false;
