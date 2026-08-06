@@ -655,6 +655,9 @@ async function loadProfiles() {
   if (models.length) renderModelList();
 }
 
+/* 启动配置选择记忆：按模型存 localStorage，打开弹窗时自动选中并回填上次使用的配置 */
+const launchProfileKey = () => "hub-launch-profile-" + selectedModelId;
+
 /* 下拉只显示当前模型的配置 */
 function renderLaunchProfiles() {
   const sel = $("launch-profile");
@@ -666,7 +669,22 @@ function renderLaunchProfiles() {
     opt.textContent = p.name;
     sel.appendChild(opt);
   }
-  sel.value = [...sel.options].some(o => o.value === current) ? current : "";
+  const has = (v) => [...sel.options].some(o => o.value === v);
+  if (current && has(current)) {
+    // 弹窗打开期间的重渲染（语言切换、保存/删除后）：保留用户当前选择
+    sel.value = current;
+  } else {
+    // 无当前选择（打开弹窗 / 切换模型后）：回退到本模型上次使用的配置并回填表单
+    const remembered = selectedModelId ? localStorage.getItem(launchProfileKey()) : null;
+    if (remembered && has(remembered)) {
+      sel.value = remembered;
+      fillLaunchForm(selectedProfile());
+    } else {
+      sel.value = "";
+      // 记忆的配置已被删除：一并清除，避免下次再匹配
+      if (remembered) localStorage.removeItem(launchProfileKey());
+    }
+  }
   updateProfileButtons();
 }
 
@@ -679,19 +697,23 @@ function updateProfileButtons() {
 }
 
 /* 选中配置 → 回填表单 */
-$("launch-profile").onchange = () => {
-  const p = selectedProfile();
-  if (p) {
-    $("launch-weights").value = p.weightsPath || "";
-    $("launch-name").value = p.instanceName || "";
-    $("launch-backend").value = p.backend || "cpu";
-    $("launch-device").value = p.device ?? "";
-    $("launch-port").value = p.port ?? "";
-    $("launch-threads").value = p.threads ?? "";
-    if (p.executableId && [...$("launch-exec").options].some(o => o.value === p.executableId)) {
-      $("launch-exec").value = p.executableId;
-    }
+function fillLaunchForm(p) {
+  if (!p) return;
+  $("launch-weights").value = p.weightsPath || "";
+  $("launch-name").value = p.instanceName || "";
+  $("launch-backend").value = p.backend || "cpu";
+  $("launch-device").value = p.device ?? "";
+  $("launch-port").value = p.port ?? "";
+  $("launch-threads").value = p.threads ?? "";
+  if (p.executableId && [...$("launch-exec").options].some(o => o.value === p.executableId)) {
+    $("launch-exec").value = p.executableId;
   }
+}
+
+$("launch-profile").onchange = () => {
+  fillLaunchForm(selectedProfile());
+  // 记住手动选择（含"新配置"），下次打开弹窗按此还原
+  if (selectedModelId) localStorage.setItem(launchProfileKey(), $("launch-profile").value);
   updateProfileButtons();
 };
 
@@ -743,6 +765,7 @@ $("profile-save-btn").onclick = async () => {
     const saved = profiles.find(p => p.modelId === selectedModelId && p.name === name);
     if (saved) {
       $("launch-profile").value = saved.id;
+      localStorage.setItem(launchProfileKey(), saved.id);
       updateProfileButtons();
     }
     showToast("info", t("profile.saved", { name }));
@@ -761,6 +784,15 @@ async function autoSaveProfile() {
       body: JSON.stringify(fields)
     });
     await loadProfiles();
+    // 记住本次启动实际使用的配置：下次打开弹窗自动选中并回填，无需再手动切换
+    const saved = existing
+      ? profiles.find(p => p.id === existing.id)
+      : profiles.find(p => p.modelId === selectedModelId && p.name === fields.name);
+    if (saved) {
+      localStorage.setItem(launchProfileKey(), saved.id);
+      $("launch-profile").value = saved.id;
+      updateProfileButtons();
+    }
   } catch (e) { /* 动态保存失败不影响启动结果 */ }
 }
 
@@ -869,7 +901,6 @@ function updateInstanceBar() {
     opt.textContent = `#${inst.id} ｜ ${inst.backend}${inst.device != null ? ":" + inst.device : ""} ｜ ${t("instance.port")} ${inst.port}`;
     select.appendChild(opt);
   }
-  const prevActive = activeInstanceId;
   const has = ready.length > 0;
   if (has) {
     if (!ready.some(i => i.id === activeInstanceId)) {
@@ -879,8 +910,8 @@ function updateInstanceBar() {
   } else {
     activeInstanceId = null;
   }
-  // 轮询导致激活实例被动切换（如实例停止）时也刷新历史列表
-  if (prevActive !== activeInstanceId) loadHistory();
+  // 注意：历史按 modelId 维度记录，与激活哪个实例无关，实例启停/切换不得刷新历史列表
+  // （重建 DOM 会打断行内播放、折叠已展开的播放器）
   select.disabled = !has;
   $("instance-stop").disabled = !has;
 
@@ -898,7 +929,6 @@ function updateInstanceBar() {
 $("instance-select").onchange = (e) => {
   activeInstanceId = e.target.value;
   renderInstanceList();
-  loadHistory();
 };
 
 $("instance-stop").onclick = async () => {
@@ -1651,8 +1681,9 @@ $("tts-emotion-alpha").addEventListener("input", (e) => {
 
 /* ---------- TTS 操作历史 ---------- */
 /* 历史按 modelId 维度记录，仅当前选中模型 category=="tts" 时显示该区块。
-   加载时机：TTS 面板渲染（renderTtsPanel）、激活实例变化（见 updateInstanceBar /
-   instance-select onchange）、合成成功（tts-submit 成功分支）、手动刷新。 */
+   加载时机：TTS 面板渲染（renderTtsPanel / 模型切换）、合成结束（tts-submit 成功与失败分支）、
+   删除/清空、手动刷新。实例启停与激活实例切换不刷新（历史与实例无关，重建会打断行内播放）。
+   fetch 为异步：响应返回时须校验当前模型未变，过期响应直接丢弃，避免覆盖新模型的列表。 */
 function historyModelId() {
   const m = selectedModel();
   return m && m.category === "tts" ? m.id : null;
