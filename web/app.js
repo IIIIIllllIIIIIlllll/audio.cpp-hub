@@ -1677,10 +1677,14 @@ async function loadHistory() {
     if (!res.ok) throw new Error(I18N.errText(text));
     items = JSON.parse(text);
   } catch (e) {
+    // 等待响应期间用户可能已切换模型：过期响应直接丢弃，避免覆盖新模型的列表
+    if (historyModelId() !== modelId) return;
     list.innerHTML = "";
     list.appendChild(el(`<div class="hint history-empty">${t("history.listFailed") + t("common.colon") + e.message}</div>`));
     return;
   }
+  // 同上：响应晚到时当前模型可能已不是 modelId，过期数据不得渲染
+  if (historyModelId() !== modelId) return;
   renderHistoryList(items);
 }
 
