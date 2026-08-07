@@ -65,8 +65,8 @@ public class SpeechForwarder {
         body.add("request", frontendBody.has("request") ? frontendBody.get("request") : new JsonObject());
         return HttpRequest.newBuilder()
                 .uri(URI.create("http://127.0.0.1:" + instance.getPort() + "/v1/tasks/run"))
-                // 懒加载 + 生成可能很慢，给足超时
-                .timeout(Duration.ofMinutes(10))
+                // 不设请求超时：生成任务时长不可预估（超长文本/弱性能机器），
+                // 中断语义由 TaskManager 的取消操作负责
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(Jsons.GSON.toJson(body)))
                 .build();

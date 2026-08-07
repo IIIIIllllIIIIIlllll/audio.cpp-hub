@@ -15,6 +15,7 @@ import org.mark.audiocpp.hub.download.DownloadManager;
 import org.mark.audiocpp.hub.instance.InstanceManager;
 import org.mark.audiocpp.hub.netty.HttpServerInitializer;
 import org.mark.audiocpp.hub.netty.HttpsSupport;
+import org.mark.audiocpp.hub.task.TaskManager;
 import org.mark.audiocpp.hub.util.Jsons;
 import org.mark.audiocpp.hub.win.AutoStartManager;
 import org.mark.audiocpp.hub.win.WindowsTray;
@@ -56,11 +57,13 @@ public class AudioHubServer {
         ProfileRegistry profileRegistry = new ProfileRegistry();
         InstanceManager instanceManager = new InstanceManager(config);
         DownloadManager downloadManager = new DownloadManager(config);
+        TaskManager taskManager = new TaskManager();
         // JVM 退出时停止所有子进程，并让下载任务落盘后暂停（下次启动自动续传）
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log.info("收到退出信号，停止所有模型实例...");
             instanceManager.stopAll();
             downloadManager.shutdown();
+            taskManager.shutdown();
         }));
 
         EventLoopGroup boss = new NioEventLoopGroup(1);
@@ -76,7 +79,7 @@ public class AudioHubServer {
             bootstrap.group(boss, worker)
                     .channel(NioServerSocketChannel.class)
                     .childHandler(new HttpServerInitializer(instanceManager, executableRegistry,
-                            profileRegistry, downloadManager, sslContext, config));
+                            profileRegistry, downloadManager, taskManager, sslContext, config));
             Channel channel = bootstrap.bind(config.httpPort).sync().channel();
             serverChannel = channel;
             log.info("audio.cpp-hub 已启动: {}://127.0.0.1:{}", sslContext != null ? "https" : "http", config.httpPort);

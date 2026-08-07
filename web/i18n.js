@@ -141,6 +141,16 @@ window.I18N = (() => {
     "history.privacyBtn": "隐私",
     "history.privacyOn": "隐私模式已开启：历史文本已隐藏，点击关闭",
     "history.privacyOff": "隐私模式：隐藏历史记录中的文本",
+    /* ---------- 异步任务（提交-排队-轮询） ---------- */
+    "task.queued": "排队中",
+    "task.queuedPos": "（前面还有 {n} 个）",
+    "task.running": "执行中",
+    "task.done": "完成",
+    "task.cancel": "取消",
+    "task.cancelFailed": "取消任务失败",
+    "task.cancelled": "已取消",
+    "task.failed": "任务失败",
+    "task.resultFailed": "结果获取失败",
     /* ---------- 情感控制 ---------- */
     "emotion.tab.none": "无",
     "emotion.tab.emotion_audio": "情感参考音频",
@@ -571,6 +581,16 @@ window.I18N = (() => {
     "history.privacyBtn": "Privacy",
     "history.privacyOn": "Privacy mode on: history texts hidden, click to turn off",
     "history.privacyOff": "Privacy mode: hide texts in history records",
+    /* ---------- async tasks (submit-queue-poll) ---------- */
+    "task.queued": "Queued",
+    "task.queuedPos": " ({n} ahead)",
+    "task.running": "Running",
+    "task.done": "Done",
+    "task.cancel": "Cancel",
+    "task.cancelFailed": "Failed to cancel task",
+    "task.cancelled": "Cancelled",
+    "task.failed": "Task failed",
+    "task.resultFailed": "Failed to fetch result",
     /* ---------- emotion control ---------- */
     "emotion.tab.none": "None",
     "emotion.tab.emotion_audio": "Emotion reference audio",

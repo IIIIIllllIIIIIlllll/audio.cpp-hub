@@ -21,6 +21,7 @@ import io.netty.handler.ssl.SslHandler;
 import io.netty.handler.timeout.ReadTimeoutHandler;
 import org.mark.audiocpp.hub.AudioHubServer;
 import org.mark.audiocpp.hub.proxy.V1ProxyHandler;
+import org.mark.audiocpp.hub.task.TaskManager;
 
 /**
  * HTTP/HTTPS 统一端口处理器。
@@ -62,16 +63,18 @@ public class HttpHttpsUnificationHandler extends ByteToMessageDecoder {
     private final ExecutableRegistry executableRegistry;
     private final ProfileRegistry profileRegistry;
     private final DownloadManager downloadManager;
+    private final TaskManager taskManager;
 
     public HttpHttpsUnificationHandler(SslContext sslContext, AudioHubServer.HubConfig config,
             InstanceManager instanceManager, ExecutableRegistry executableRegistry,
-            ProfileRegistry profileRegistry, DownloadManager downloadManager) {
+            ProfileRegistry profileRegistry, DownloadManager downloadManager, TaskManager taskManager) {
         this.sslContext = sslContext;
         this.config = config;
         this.instanceManager = instanceManager;
         this.executableRegistry = executableRegistry;
         this.profileRegistry = profileRegistry;
         this.downloadManager = downloadManager;
+        this.taskManager = taskManager;
     }
 
     @Override
@@ -151,7 +154,8 @@ public class HttpHttpsUnificationHandler extends ByteToMessageDecoder {
         pipeline.addLast(new HttpServerCodec());
         pipeline.addLast(new V1ProxyHandler(instanceManager, config.proxyMaxBodyBytes));
         pipeline.addLast(new HttpObjectAggregator(MAX_HTTP_CONTENT_LENGTH));
-        pipeline.addLast(new ApiHandler(instanceManager, executableRegistry, profileRegistry, downloadManager, config));
+        pipeline.addLast(new ApiHandler(instanceManager, executableRegistry, profileRegistry, downloadManager,
+                taskManager, config));
         pipeline.addLast(new StaticFileHandler());
     }
 }

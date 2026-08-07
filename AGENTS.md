@@ -7,7 +7,7 @@ audio.cpp-hub 是 [audio.cpp](https://github.com/0xShug0/audio.cpp) 的 Web 管�
 - 入口类：`org.mark.audiocpp.hub.AudioHubServer`
 - hub 本身默认监听 `httpPort`（`hub.config.json`，本仓库开发副本为 18080，代码内默认 8080）；各模型实例从 `instancePortBase`（本副本 18090）起自动分配端口，绑定 127.0.0.1
 - 模型实例不在 JVM 内运行：hub 为每个实例写 `run/<id>/server.json`，再用 `ProcessBuilder` 拉起外部 `audiocpp_server --config server.json`，stdout/stderr 重定向到 `run/<id>/server.log`，并后台轮询实例的 `/health`（最多 120s）
-- 推理请求转发路径：前端 `POST /api/run/<instanceId>` → `SpeechForwarder` → 实例 `http://127.0.0.1:<port>/v1/tasks/run`，响应 JSON 原样透传。**TTS 任务走流式链路**：响应落盘到 `data/history/<modelId>/<taskId>.resp.tmp` → `HistoryAudioExtractor` 流式提取顶层 `"audio"` 字段解码写成 `<taskId>.wav` → 记录操作历史 → 临时文件分块流式回写前端（写完删除），大 base64 全程不进堆；非 TTS 任务维持整串透传
+- 推理任务走**异步队列**（前端主链路）：`POST /api/tasks`（body `{"instanceId","request":{...}}`）创建任务立即返回，`TaskManager` 为每个实例起一个单线程 executor **同实例串行排队执行**（与引擎 busy 锁语义一致），**无执行时长上限**（转发层 SpeechForwarder 已移除原 10 分钟硬超时）；`GET /api/tasks[?active=1&modelId=]`（列表，活跃在前）、`GET /api/tasks/<id>`（详情含队列位置 position）、`GET /api/tasks/<id>/result`（非 TTS 结果 `data/tasks/<id>.result.json` 流式回写）、`DELETE /api/tasks/<id>`（QUEUED 直接取消 / RUNNING 中断 hub 侧等待——引擎会跑完，属已知限制 / 已结束则删除记录）。任务状态**纯内存**（hub 重启即丢，启动时清空 `data/tasks/`），已完成任务内存保留最近 100 条。TTS 任务复用历史链路：taskId 即历史记录 id，响应落盘后 `HistoryAudioExtractor` 提取 `"audio"` 写成 `data/history/<modelId>/<taskId>.wav`，前端结果音频直接用 `/api/history/.../audio` URL（不碰 base64）；非 TTS 结果统一 `forwardToFile` 落盘。前端 2s 轮询，**任务并入右侧操作历史侧栏**（任务创建即一条记录：进行中的在前，已结束的其次；TTS 终态与历史按 taskId 去重由历史行代表，非 TTS 完成任务行带「载入」可重新渲染结果；进行中行内可取消，侧栏对所有类别开放），允许连续提交排队；页面加载与模型切换时经 `?modelId=` 重挂全部任务（进行中的恢复轮询），**刷新页面不再丢任务**。旧 `POST /api/run/<instanceId>` 同步接口保留兼容（同样已无 10 分钟上限），其 TTS 流式链路不变：`SpeechForwarder` → 实例 `http://127.0.0.1:<port>/v1/tasks/run`，TTS 响应落盘 → 提取进历史 → 临时文件分块回写
 - 操作历史（TTS）：按 modelId 隔离到 `data/history/<modelId>/`（`index.jsonl` 一行一条记录只追加 + `<taskId>.wav` 结果音频），内存索引启动时回放重建，每模型上限 50 条 / 500MB 超出淘汰最旧。API：`GET /api/history/<modelId>`（简要列表，新→旧，text 截断 100 字并带 `textTruncated` 标记）、`GET /api/history/<modelId>/<taskId>`（完整记录）、`GET /api/history/<modelId>/<taskId>/audio`（流式回 wav）、`DELETE /api/history/<modelId>[/<taskId>]`（清空 / 单删）。前端为右侧边栏（窄屏抽屉式弹出），音频懒加载（点击播放才拉取 wav）；界面记住上次选中的模型（localStorage `hub-model`），刷新后历史视图不丢
 - OpenAI 兼容代理：`GET /v1/models` 列出全部 READY 实例的服务名；`POST /v1/*`（如 `/v1/audio/speech`）由 `V1ProxyHandler` 接收——请求体分块落盘到 `run/proxy-cache/`（上限 `hub.config.json` 的 `proxyMaxBodyBytes`，默认 1GB），流式扫描提取顶层 `"model"` 后按服务名路由，路径与 body 原样 `ofFile` 转发到实例同名接口，响应分块流式回写；大 base64 全程不进 JVM 堆。错误体为 OpenAI 风格 `{"error":{"message","type"}}`
 - 实例服务名（instanceName）：启动时可显式指定（默认 modelId），是 `/v1/*` 的路由键，也写进实例 server.json 的 model id（实例自校验一致）；全局唯一，重名拒绝启动
@@ -46,6 +46,9 @@ src/main/java/org/mark/audiocpp/hub/
 │                         # 进度/速率统计、任务状态原子落盘 data/downloads/<id>/task.json、启动自动续传、
 │                         # HF token；单例，由 AudioHubServer 创建并注入 ApiHandler）、
 │                         # DownloadTask（任务/文件/分段数据模型，Gson 直接序列化，含路径/URL 校验）
+├── task/                 # 推理任务队列：TaskManager（/api/tasks 异步任务、每实例单线程 executor 串行排队、
+│                         # 状态纯内存 + 非 TTS 结果落盘 data/tasks/、TTS 复用历史链路；单例，由 AudioHubServer
+│                         # 创建并注入 ApiHandler，二者共享同一个 HistoryManager）、HubTask（任务数据模型，含 text 文本预览字段）
 ├── config/               # ExecutableRegistry（executables.json：audiocpp_server 可执行文件登记，条目可带 env 环境变量表，
 │                         # 拉起子进程时注入，值支持 ${VAR} 占位符按 hub 进程环境展开；支持 PUT /api/executables/<id> 更新）、
 │                         # ProfileRegistry（data/profiles.json：模型启动配置档案）
@@ -68,7 +71,7 @@ launcher/                 # C 启动器（CMakeLists.txt + launcher.c + launcher
 lib/                      # 本地依赖 jar（pom 与 launcher.conf 都直接引用）
 ```
 
-运行时（相对工作目录）产生的数据，均被 `.gitignore` 排除：`logs/`、`run/<instanceId>/`（server.json + server.log，停止后自动清理）、`data/`（uploads/、voices/、profiles.json、history/<modelId>/ 操作历史、downloads/<taskId>/ 下载任务状态）、`models/`（下载的模型权重）、`ssl/`（HTTPS 证书）、`build/`（javac 输出）、`executables.json`、`hub.config.json`。
+运行时（相对工作目录）产生的数据，均被 `.gitignore` 排除：`logs/`、`run/<instanceId>/`（server.json + server.log，停止后自动清理）、`data/`（uploads/、voices/、profiles.json、history/<modelId>/ 操作历史、downloads/<taskId>/ 下载任务状态、tasks/<id>.result.json 推理任务结果——启动时清空）、`models/`（下载的模型权重）、`ssl/`（HTTPS 证书）、`build/`（javac 输出）、`executables.json`、`hub.config.json`。
 
 ## HTTPS
 

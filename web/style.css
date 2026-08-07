@@ -1172,7 +1172,9 @@ footer { padding: 4px 24px 18px; }
 /* 失败记录：左侧红条 + 文本弱化，与成功记录区分 */
 .history-row.failed { box-shadow: inset 3px 0 0 var(--err); }
 .history-row.failed .history-text { color: var(--text-dim); }
-.history-info { display: flex; align-items: center; gap: 10px; }
+/* 侧栏只有 320px：时间/meta/按钮都是 flex:none，单行放不下时会把唯一可缩的 .history-text
+   压成 0 宽（看不见提示词）。允许换行并让文本独占一行（order 2），保证文本始终可见 */
+.history-info { display: flex; align-items: center; column-gap: 10px; row-gap: 4px; flex-wrap: wrap; }
 .history-time {
   flex: none;
   font-size: 12px;
@@ -1180,7 +1182,8 @@ footer { padding: 4px 24px 18px; }
   font-variant-numeric: tabular-nums;
 }
 .history-text {
-  flex: 1;
+  order: 2;
+  flex: 1 1 100%;
   min-width: 0;
   font-size: 13px;
   overflow: hidden;
@@ -1194,9 +1197,11 @@ footer { padding: 4px 24px 18px; }
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.history-btns { flex: none; display: flex; gap: 6px; }
+.history-btns { flex: none; display: flex; gap: 6px; margin-left: auto; }
 .history-btns button { padding: 3px 10px; font-size: 12px; }
 .history-error { margin-top: 4px; }
+/* 任务行（队列并入侧栏）：状态/耗时用主色，与历史记录的弱化 meta 区分 */
+.task-row .history-meta { color: var(--accent); font-weight: 600; }
 .history-player { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .history-player audio { flex: 1; height: 34px; min-width: 0; }
 .history-player .btn-ghost { flex: none; padding: 4px 12px; font-size: 12px; }

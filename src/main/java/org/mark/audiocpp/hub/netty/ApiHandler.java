@@ -33,6 +33,8 @@ import org.mark.audiocpp.hub.history.HistoryManager;
 import org.mark.audiocpp.hub.instance.InstanceManager;
 import org.mark.audiocpp.hub.instance.ModelInstance;
 import org.mark.audiocpp.hub.proxy.SpeechForwarder;
+import org.mark.audiocpp.hub.task.HubTask;
+import org.mark.audiocpp.hub.task.TaskManager;
 import org.mark.audiocpp.hub.util.Jsons;
 import org.mark.audiocpp.hub.util.ModelPackageRegistry;
 import org.mark.audiocpp.hub.util.ModelRegistry;
@@ -52,6 +54,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * API 路由。处理不了的 GET 请求透传给 StaticFileHandler。
@@ -64,19 +67,23 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
     private final ExecutableRegistry executableRegistry;
     private final ProfileRegistry profileRegistry;
     private final DownloadManager downloadManager;
+    private final TaskManager taskManager;
     private final AudioHubServer.HubConfig config;
     private final SpeechForwarder speechForwarder = new SpeechForwarder();
     private final VoiceLibrary voiceLibrary = new VoiceLibrary();
     private final FileSystemBrowser fileSystemBrowser = new FileSystemBrowser();
-    private final HistoryManager historyManager = new HistoryManager();
+    // 与 TaskManager 共享同一实例：异步任务的 TTS 结果/失败记录与历史 API 读的是同一份索引
+    private final HistoryManager historyManager;
 
     public ApiHandler(InstanceManager instanceManager, ExecutableRegistry executableRegistry,
                       ProfileRegistry profileRegistry, DownloadManager downloadManager,
-                      AudioHubServer.HubConfig config) {
+                      TaskManager taskManager, AudioHubServer.HubConfig config) {
         this.instanceManager = instanceManager;
         this.executableRegistry = executableRegistry;
         this.profileRegistry = profileRegistry;
         this.downloadManager = downloadManager;
+        this.taskManager = taskManager;
+        this.historyManager = taskManager.historyManager();
         this.config = config;
     }
 
@@ -170,6 +177,15 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         } else if (method.equals(HttpMethod.POST) && path.startsWith("/api/run/")) {
             String instanceId = path.substring("/api/run/".length());
             handleRun(ctx, request, instanceId);
+        } else if (method.equals(HttpMethod.POST) && path.equals("/api/tasks")) {
+            handleTaskCreate(ctx, request);
+        } else if (method.equals(HttpMethod.GET) && path.equals("/api/tasks")) {
+            // ?active=1 只返回 QUEUED/RUNNING（前端页面加载重挂用）；?modelId= 按模型过滤
+            boolean activeOnly = "1".equals(firstParam(decoder, "active"));
+            sendJson(ctx, HttpResponseStatus.OK,
+                    taskManager.list(activeOnly, firstParam(decoder, "modelId")).toString(), request);
+        } else if (path.startsWith("/api/tasks/")) {
+            handleTask(ctx, request, method, path.substring("/api/tasks/".length()));
         } else if (method.equals(HttpMethod.GET) && path.equals("/api/downloads")) {
             sendJson(ctx, HttpResponseStatus.OK, downloadManager.list().toString(), request);
         } else if (method.equals(HttpMethod.POST) && path.equals("/api/downloads")) {
@@ -555,6 +571,93 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         sendFileChunked(ctx, HttpResponseStatus.OK, "application/json; charset=utf-8", tmp, request, true);
     }
 
+    /* ---------- 异步推理任务（/api/tasks） ---------- */
+
+    /** 任务 id 校验（沿用项目防路径穿越约定）。 */
+    private static final Pattern SAFE_TASK_ID = Pattern.compile("[a-zA-Z0-9-]{1,32}");
+
+    /**
+     * 创建推理任务：body {"instanceId","request":{...}}，实例须存在且 READY。
+     * 创建即入队（同实例串行执行），202 返回任务详情（含队列位置）。
+     */
+    private void handleTaskCreate(ChannelHandlerContext ctx, FullHttpRequest request) {
+        JsonObject body;
+        try {
+            body = JsonParser.parseString(request.content().toString(CharsetUtil.UTF_8)).getAsJsonObject();
+        } catch (Exception e) {
+            sendJson(ctx, HttpResponseStatus.BAD_REQUEST,
+                    Jsons.error("INVALID_JSON", null, "请求体不是合法 JSON"), request);
+            return;
+        }
+        if (!body.has("instanceId") || !body.get("instanceId").isJsonPrimitive()) {
+            sendJson(ctx, HttpResponseStatus.BAD_REQUEST,
+                    Jsons.error("INSTANCE_REQUIRED", null, "缺少 instanceId"), request);
+            return;
+        }
+        String instanceId = body.get("instanceId").getAsString();
+        ModelInstance instance = instanceManager.get(instanceId);
+        if (instance == null) {
+            sendJson(ctx, HttpResponseStatus.NOT_FOUND,
+                    Jsons.error("INSTANCE_NOT_FOUND", Map.of("id", instanceId), "实例不存在: " + instanceId), request);
+            return;
+        }
+        if (instance.getStatus() != ModelInstance.Status.READY) {
+            sendJson(ctx, HttpResponseStatus.CONFLICT,
+                    Jsons.error("INSTANCE_NOT_READY", Map.of("status", instance.getStatus().name()),
+                            "实例未就绪，当前状态: " + instance.getStatus()), request);
+            return;
+        }
+        HubTask task = taskManager.submit(instance, body);
+        sendJson(ctx, HttpResponseStatus.ACCEPTED, taskManager.get(task.id).toString(), request);
+    }
+
+    /**
+     * 单任务操作：GET /api/tasks/<id> 详情；GET /api/tasks/<id>/result 非 TTS 结果（流式回写，
+     * TTS 结果走 /api/history/<modelId>/<taskId>/audio）；DELETE 取消（QUEUED/RUNNING）或删除记录（已结束）。
+     */
+    private void handleTask(ChannelHandlerContext ctx, FullHttpRequest request, HttpMethod method, String rest) {
+        String id = rest;
+        boolean result = false;
+        if (rest.endsWith("/result")) {
+            id = rest.substring(0, rest.length() - "/result".length());
+            result = true;
+        }
+        if (!SAFE_TASK_ID.matcher(id).matches()) {
+            sendJson(ctx, HttpResponseStatus.NOT_FOUND,
+                    Jsons.error("TASK_NOT_FOUND", Map.of("id", id), "任务不存在: " + id), request);
+            return;
+        }
+        if (method.equals(HttpMethod.GET) && !result) {
+            JsonObject task = taskManager.get(id);
+            if (task == null) {
+                sendJson(ctx, HttpResponseStatus.NOT_FOUND,
+                        Jsons.error("TASK_NOT_FOUND", Map.of("id", id), "任务不存在: " + id), request);
+            } else {
+                sendJson(ctx, HttpResponseStatus.OK, task.toString(), request);
+            }
+        } else if (method.equals(HttpMethod.GET) && result) {
+            Path resultFile = taskManager.resultPath(id);
+            if (resultFile == null || !Files.exists(resultFile)) {
+                sendJson(ctx, HttpResponseStatus.NOT_FOUND,
+                        Jsons.error("RESULT_NOT_FOUND", Map.of("id", id),
+                                "结果不存在（TTS 结果请走 /api/history）: " + id), request);
+            } else {
+                sendFileChunked(ctx, HttpResponseStatus.OK, "application/json; charset=utf-8",
+                        resultFile, request, false);
+            }
+        } else if (method.equals(HttpMethod.DELETE)) {
+            if (taskManager.cancel(id)) {
+                sendJson(ctx, HttpResponseStatus.OK, Jsons.ok(Map.of("id", id)), request);
+            } else {
+                sendJson(ctx, HttpResponseStatus.NOT_FOUND,
+                        Jsons.error("TASK_NOT_FOUND", Map.of("id", id), "任务不存在: " + id), request);
+            }
+        } else {
+            sendJson(ctx, HttpResponseStatus.METHOD_NOT_ALLOWED,
+                    Jsons.error("METHOD_NOT_ALLOWED", null, "不支持的方法"), request);
+        }
+    }
+
     /**
      * 创建下载任务，两种形式：
      * 1) {"modelId","packageId"?,"token"?,"overwrite"?,"endpoint"?} — 按 model-packages.json 清单生成文件列表
@@ -724,15 +827,24 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
     }
 
     /**
-     * 文件分块回写（chunked，避免整文件进堆）；deleteAfter 在写出完成后删除文件。
+     * 文件流式回写（Content-Length 已知，分块写避免整文件进堆）；deleteAfter 在写出完成后删除文件。
+     * 不能用 chunked：浏览器 <audio> 需要 Content-Length 才能算出总时长。
      * 在 eventLoop 上同步读文件，与 handleRun 的阻塞转发同款取舍（本地单用户）。
      */
     private void sendFileChunked(ChannelHandlerContext ctx, HttpResponseStatus status, String contentType,
                                  Path file, FullHttpRequest request, boolean deleteAfter) {
         boolean keepAlive = HttpUtil.isKeepAlive(request);
+        long length;
+        try {
+            length = Files.size(file);
+        } catch (IOException e) {
+            sendJson(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR,
+                    Jsons.error("FILE_IO", null, "文件读取失败: " + e.getMessage()), request);
+            return;
+        }
         DefaultHttpResponse head = new DefaultHttpResponse(HttpVersion.HTTP_1_1, status);
         head.headers().set(HttpHeaderNames.CONTENT_TYPE, contentType);
-        head.headers().set(HttpHeaderNames.TRANSFER_ENCODING, HttpHeaderValues.CHUNKED);
+        head.headers().set(HttpHeaderNames.CONTENT_LENGTH, length);
         head.headers().set(HttpHeaderNames.CACHE_CONTROL, "no-cache");
         head.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
         if (!keepAlive) {

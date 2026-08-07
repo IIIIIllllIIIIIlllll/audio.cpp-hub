@@ -33,7 +33,6 @@ let ttsVariant = "base";
 let ttsLanguageSel = null;
 let asrLanguageSel = null;
 let otherLanguageSel = null;
-let ttsAudioUrl = null;
 /* VibeVoice 多说话人：每行一个 AudioPicker，第 N 行对应脚本里的 Speaker N（voice_samples 顺序） */
 let speakerPickers = [];
 const VIBEVOICE_MAX_SPEAKERS = 4;
@@ -1198,16 +1197,138 @@ function showToast(level, message) {
   setTimeout(() => node.remove(), 8000);
 }
 
-/* ---------- 通用运行 ---------- */
-async function runTask(requestObj) {
-  const res = await fetch("/api/run/" + activeInstanceId, {
+/* ---------- 异步任务（提交 → 排队 → 轮询） ----------
+   提交后立即返回，同实例任务由后端串行执行，前端 2s 轮询状态。
+   页面刷新/切换模型后经 GET /api/tasks?active=1&modelId= 重挂，
+   任务生命周期不再绑定页面连接（旧 /api/run 同步链路保留兼容）。 */
+const activePolls = new Map(); // taskId → intervalId
+const taskViews = new Map(); // taskId → 已知任务（进行中 + 已完成保留展示），供侧栏渲染
+const TASK_VERB = { tts: "tts.verb", asr: "asr.verb", sep: "sep.verb", other: "other.verb" };
+
+async function submitTask(req) {
+  const res = await fetch("/api/tasks", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ request: requestObj })
+    body: JSON.stringify({ instanceId: activeInstanceId, request: req })
   });
   const text = await res.text();
   if (!res.ok) throw new Error(I18N.errText(text));
   return JSON.parse(text);
+}
+
+async function fetchTask(taskId) {
+  const res = await fetch("/api/tasks/" + taskId);
+  const text = await res.text();
+  if (!res.ok) {
+    const err = new Error(I18N.errText(text));
+    err.status = res.status;
+    throw err;
+  }
+  return JSON.parse(text);
+}
+
+/* 任务耗时：优先用后端 startedAt→finishedAt，进行中算到当前时刻 */
+function taskElapsed(task) {
+  const end = task.finishedAt || Date.now();
+  return ((end - (task.startedAt || task.createdAt)) / 1000).toFixed(1) + "s";
+}
+
+/* 取消任务：服务端置 CANCELLED，由轮询观察到终态后统一收尾（toast/侧栏刷新） */
+async function cancelTask(taskId) {
+  try {
+    const res = await fetch("/api/tasks/" + taskId, { method: "DELETE" });
+    if (!res.ok) throw new Error(I18N.errText(await res.text()));
+  } catch (e) {
+    showToast("error", t("task.cancelFailed") + t("common.colon") + e.message);
+  }
+}
+
+/* 跟踪任务：入侧栏记录并启动轮询；到达终态时停轮询、渲染结果（记录保留在侧栏） */
+function trackTask(task) {
+  taskViews.set(task.id, task);
+  renderSidebarList();
+  if (activePolls.has(task.id)) return;
+  if (task.status !== "QUEUED" && task.status !== "RUNNING") return;
+  const iv = setInterval(async () => {
+    let cur;
+    try {
+      cur = await fetchTask(task.id);
+    } catch (e) {
+      if (e.status === 404) {
+        // 任务记录已被淘汰/删除：停止轮询并移出侧栏
+        clearInterval(iv);
+        activePolls.delete(task.id);
+        taskViews.delete(task.id);
+        renderSidebarList();
+      }
+      return; // 其余错误视为网络抖动，下轮再试
+    }
+    taskViews.set(cur.id, cur);
+    renderSidebarList();
+    if (cur.status !== "QUEUED" && cur.status !== "RUNNING") {
+      clearInterval(iv);
+      activePolls.delete(cur.id);
+      finishTask(cur);
+    }
+  }, 2000);
+  activePolls.set(task.id, iv);
+}
+
+/* 任务终态：toast 汇报；任务模型当前选中时渲染结果与最终状态行 */
+function finishTask(task) {
+  const verb = t(TASK_VERB[task.category] || "other.verb");
+  const m = selectedModel();
+  const current = m && m.id === task.modelId;
+  const stats = current ? $(task.category + "-stats") : null;
+  const msg = current ? $(task.category + "-msg") : null;
+  if (task.status === "DONE") {
+    showToast("info", t("common.doneElapsed", { verb, t: taskElapsed(task) }));
+    if (stats) stats.textContent = t("common.doneElapsed", { verb, t: taskElapsed(task) });
+    if (current) renderTaskResult(task);
+  } else {
+    const errText = task.status === "CANCELLED" ? t("task.cancelled") : task.error || t("task.failed");
+    showToast("error", t("common.failedElapsed", { verb, t: taskElapsed(task), msg: errText }));
+    if (msg) msg.textContent = t("common.failedElapsed", { verb, t: taskElapsed(task), msg: errText });
+  }
+  // 成功与失败后端都已写历史（TTS），刷新侧栏让其即时可见
+  if (task.category === "tts") loadHistory();
+}
+
+/* DONE 结果渲染：TTS 直接引用历史 wav URL（不碰 base64）；其余拉取 /result JSON 走原渲染分支 */
+async function renderTaskResult(task) {
+  if (task.category === "tts") {
+    const url = "/api/history/" + task.modelId + "/" + task.id + "/audio";
+    $("tts-player").src = url;
+    const download = $("tts-download");
+    download.href = url;
+    download.download = "tts-" + task.id + ".wav";
+    $("tts-result").classList.remove("hidden");
+    return;
+  }
+  try {
+    const res = await fetch("/api/tasks/" + task.id + "/result");
+    const text = await res.text();
+    if (!res.ok) throw new Error(I18N.errText(text));
+    const json = JSON.parse(text);
+    if (task.category === "asr") renderAsrResult(json);
+    else if (task.category === "sep") renderSepResult(json);
+    else renderOtherResult(json);
+  } catch (e) {
+    const msg = $(task.category + "-msg");
+    if (msg) msg.textContent = t("task.resultFailed") + t("common.colon") + e.message;
+  }
+}
+
+/* 页面加载 / 模型切换后重挂当前模型的任务（含已完成记录；进行中的恢复轮询） */
+async function reattachTasks() {
+  const m = selectedModel();
+  if (!m) return;
+  try {
+    const res = await fetch("/api/tasks?modelId=" + encodeURIComponent(m.id));
+    if (!res.ok) return;
+    const tasks = JSON.parse(await res.text());
+    for (const task of tasks) trackTask(task);
+  } catch (e) { /* 忽略：下次切换/轮询再试 */ }
 }
 
 /* ---------- 任务等待遮罩（spinner + 实时计时） ---------- */
@@ -1226,9 +1347,6 @@ function hideBusy() {
   clearInterval(busyTimer);
   busyTimer = null;
   $("busy-overlay").classList.add("hidden");
-}
-function fmtElapsed(start) {
-  return t("common.elapsedSec", { s: ((performance.now() - start) / 1000).toFixed(1) });
 }
 
 function b64ToBlob(b64, mime) {
@@ -1274,6 +1392,9 @@ function renderWorkspace() {
   else if (m.category === "asr") renderAsrPanel(m);
   else if (m.category === "sep") renderSepPanel(m);
   else renderOtherPanel(m);
+  // 面板重渲染后刷新侧栏并重挂该模型的进行中任务（恢复进度显示）
+  loadHistory();
+  reattachTasks();
 }
 
 /* ---------- 参数渲染辅助 ---------- */
@@ -1519,7 +1640,6 @@ function renderTtsPanel(m) {
   $("tts-result").classList.add("hidden");
   $("tts-msg").textContent = "";
   $("tts-stats").textContent = "";
-  loadHistory();
 }
 
 function updateTtsBlocks(m) {
@@ -1544,7 +1664,6 @@ function updateTtsBlocks(m) {
 $("tts-submit").onclick = async () => {
   const m = selectedModel();
   const msg = $("tts-msg");
-  const btn = $("tts-submit");
   msg.textContent = "";
   $("tts-result").classList.add("hidden");
   if (!activeInstanceId) { msg.textContent = t("instance.noReady"); return; }
@@ -1637,37 +1756,12 @@ $("tts-submit").onclick = async () => {
 
   collectParams(m, "adv", req);
 
-  btn.disabled = true;
-  btn.textContent = t("tts.running");
-  const stats = $("tts-stats");
-  stats.textContent = "";
-  const start = showBusy(t("tts.busy"));
+  // 异步任务：提交即返回，排队/执行进度由 trackTask 轮询展示，按钮不再阻塞（允许连续提交排队）
+  $("tts-stats").textContent = "";
   try {
-    const json = await runTask(req);
-    if (!json.audio) {
-      msg.textContent = t("tts.noAudio") + JSON.stringify(json).substring(0, 300);
-      // 失败记录后端已落盘，刷新侧栏让其即时可见
-      loadHistory();
-      return;
-    }
-    // 替换前回收上一次的 objectURL，避免每次合成泄漏一个 Blob
-    if (ttsAudioUrl) URL.revokeObjectURL(ttsAudioUrl);
-    const url = URL.createObjectURL(b64ToBlob(json.audio, "audio/wav"));
-    ttsAudioUrl = url;
-    $("tts-player").src = url;
-    const download = $("tts-download");
-    download.href = url;
-    $("tts-result").classList.remove("hidden");
-    stats.textContent = t("common.doneElapsed", { verb: t("tts.verb"), t: fmtElapsed(start) });
-    loadHistory();
+    trackTask(await submitTask(req));
   } catch (e) {
-    msg.textContent = t("common.failedElapsed", { verb: t("tts.verb"), t: fmtElapsed(start), msg: e.message });
-    // 引擎侧失败（非 200 / 响应无法解析）后端同样记录了失败历史，刷新侧栏
-    loadHistory();
-  } finally {
-    hideBusy();
-    btn.disabled = false;
-    btn.textContent = submitLabel("tts-submit");
+    msg.textContent = e.message;
   }
 };
 
@@ -1704,15 +1798,20 @@ $("tts-emotion-alpha").addEventListener("input", (e) => {
   $("emotion-alpha-val").textContent = parseFloat(e.target.value).toFixed(2);
 });
 
-/* ---------- TTS 操作历史 ---------- */
-/* 历史按 modelId 维度记录，仅当前选中模型 category=="tts" 时显示该区块。
-   加载时机：TTS 面板渲染（renderTtsPanel / 模型切换）、合成结束（tts-submit 成功与失败分支）、
+/* ---------- 侧栏：操作历史 + 任务记录 ---------- */
+/* 侧栏对所有类别开放：进行中的任务（排队/执行中）排最前，已结束的该模型任务其次，
+   TTS 再追加落盘的操作历史（成功/失败都会写历史，与任务按 taskId 去重，由历史行代表）。
+   任务一创建即视为一条操作记录出现在侧栏，生命周期不再绑定页面连接。
+   加载时机：工作区渲染（renderWorkspace / 模型切换）、任务终态（finishTask）、
    删除/清空、手动刷新。实例启停与激活实例切换不刷新（历史与实例无关，重建会打断行内播放）。
    fetch 为异步：响应返回时须校验当前模型未变，过期响应直接丢弃，避免覆盖新模型的列表。 */
 function historyModelId() {
   const m = selectedModel();
-  return m && m.category === "tts" ? m.id : null;
+  return m ? m.id : null;
 }
+
+/* 当前模型的 TTS 历史记录（非 TTS 恒为空数组），由 loadHistory 维护，renderSidebarList 消费 */
+let sidebarHistoryItems = [];
 
 async function loadHistory() {
   const block = $("history-sidebar");
@@ -1725,7 +1824,13 @@ async function loadHistory() {
   }
   block.classList.remove("hidden");
   $("history-fab").classList.remove("hidden");
-  const list = $("history-list");
+  const m = selectedModel();
+  if (!m || m.category !== "tts") {
+    // 非 TTS 无落盘历史，侧栏只展示任务记录
+    sidebarHistoryItems = [];
+    renderSidebarList();
+    return;
+  }
   let items;
   try {
     const res = await fetch("/api/history/" + modelId);
@@ -1735,23 +1840,91 @@ async function loadHistory() {
   } catch (e) {
     // 等待响应期间用户可能已切换模型：过期响应直接丢弃，避免覆盖新模型的列表
     if (historyModelId() !== modelId) return;
+    sidebarHistoryItems = [];
+    const list = $("history-list");
     list.innerHTML = "";
     list.appendChild(el(`<div class="hint history-empty">${t("history.listFailed") + t("common.colon") + e.message}</div>`));
     return;
   }
   // 同上：响应晚到时当前模型可能已不是 modelId，过期数据不得渲染
   if (historyModelId() !== modelId) return;
-  renderHistoryList(items);
+  sidebarHistoryItems = items;
+  renderSidebarList();
 }
 
-function renderHistoryList(items) {
+/* 侧栏合并渲染：进行中任务（创建时间升序）→ 已结束任务（新→旧，TTS 已被历史代表的去重）→ TTS 历史 */
+function renderSidebarList() {
   const list = $("history-list");
+  const modelId = historyModelId();
+  if (!modelId) return;
   list.innerHTML = "";
-  if (!items.length) {
-    list.appendChild(el(`<div class="hint history-empty">${t("history.empty")}</div>`));
-    return;
+  const tasks = [...taskViews.values()].filter(x => x.modelId === modelId);
+  const active = tasks.filter(x => x.status === "QUEUED" || x.status === "RUNNING")
+    .sort((a, b) => a.createdAt - b.createdAt);
+  const finished = tasks.filter(x => x.status !== "QUEUED" && x.status !== "RUNNING")
+    .sort((a, b) => (b.finishedAt || b.createdAt) - (a.finishedAt || a.createdAt));
+  const historyIds = new Set(sidebarHistoryItems.map(i => i.taskId));
+  let rows = 0;
+  for (const task of active) { list.appendChild(makeTaskRow(task)); rows++; }
+  for (const task of finished) {
+    // TTS 成功/失败都已写历史，由历史行代表；CANCELLED 无历史记录，仍需显示
+    if (task.category === "tts" && historyIds.has(task.id)) continue;
+    list.appendChild(makeTaskRow(task));
+    rows++;
   }
-  for (const item of items) list.appendChild(makeHistoryRow(item));
+  for (const item of sidebarHistoryItems) { list.appendChild(makeHistoryRow(item)); rows++; }
+  if (!rows) list.appendChild(el(`<div class="hint history-empty">${t("history.empty")}</div>`));
+}
+
+/* 单行任务：复用 history-row 结构。进行中显示状态与「取消」；DONE 非 TTS 可「载入」重新渲染结果；
+   FAILED 红字显示 error；文本预览与历史行共用 dataset.realText，隐私模式同样生效 */
+function makeTaskRow(task) {
+  const row = el(`<div class="history-row task-row${task.status === "FAILED" ? " failed" : ""}">
+    <div class="history-info">
+      <span class="history-time"></span>
+      <span class="history-text"></span>
+      <span class="history-meta"></span>
+      <span class="history-btns"></span>
+    </div>
+  </div>`);
+  row.querySelector(".history-time").textContent = new Date(task.createdAt).toLocaleString();
+  const textEl = row.querySelector(".history-text");
+  textEl.dataset.realText = task.text || "";
+  textEl.textContent = privacyOn() && task.text ? t("history.masked") : task.text || t("history.noText");
+  if (task.text && !privacyOn()) textEl.title = task.text;
+  const meta = [];
+  if (task.status === "QUEUED") {
+    meta.push(t("task.queued") + (task.position > 0 ? t("task.queuedPos", { n: task.position }) : ""));
+  } else if (task.status === "RUNNING") {
+    meta.push(t("task.running") + " " + taskElapsed(task));
+  } else if (task.status === "DONE") {
+    meta.push(t("task.done") + " " + taskElapsed(task));
+  } else if (task.status === "CANCELLED") {
+    meta.push(t("task.cancelled"));
+  } else {
+    meta.push(t("task.failed"));
+  }
+  if (task.instanceName) meta.push(task.instanceName);
+  row.querySelector(".history-meta").textContent = meta.join(" ｜ ");
+  const btns = row.querySelector(".history-btns");
+  if (task.status === "QUEUED" || task.status === "RUNNING") {
+    const cancelBtn = el(`<button type="button" class="stop-btn"></button>`);
+    cancelBtn.textContent = t("task.cancel");
+    cancelBtn.onclick = () => cancelTask(task.id);
+    btns.appendChild(cancelBtn);
+  } else if (task.status === "DONE" && task.category !== "tts") {
+    const loadBtn = el(`<button type="button"></button>`);
+    loadBtn.textContent = t("history.load");
+    loadBtn.onclick = () => renderTaskResult(task);
+    btns.appendChild(loadBtn);
+  }
+  if (task.status === "FAILED") {
+    const err = el(`<div class="error-text history-error"></div>`);
+    err.textContent = task.error || t("task.failed");
+    if (task.error) err.title = task.error;
+    row.appendChild(err);
+  }
+  return row;
 }
 
 /* 单行历史：信息行（时间 / 文本预览 / 时长与大小 / 按钮）+ 成功行内播放与下载；失败行红字显示 error */
@@ -1839,7 +2012,24 @@ $("history-refresh").onclick = loadHistory;
 
 $("history-clear").onclick = async () => {
   const modelId = historyModelId();
-  if (!modelId || !window.confirm(t("history.confirmClear"))) return;
+  const m = selectedModel();
+  if (!modelId || !m || !window.confirm(t("history.confirmClear"))) return;
+  if (m.category !== "tts") {
+    // 非 TTS 无落盘历史：逐个删除该模型已结束的任务记录（进行中的保留）
+    const finished = [...taskViews.values()].filter(x =>
+      x.modelId === modelId && x.status !== "QUEUED" && x.status !== "RUNNING");
+    try {
+      for (const task of finished) {
+        const res = await fetch("/api/tasks/" + task.id, { method: "DELETE" });
+        if (!res.ok) throw new Error(I18N.errText(await res.text()));
+        taskViews.delete(task.id);
+      }
+      renderSidebarList();
+    } catch (e) {
+      showToast("error", t("history.clearFailed") + t("common.colon") + e.message);
+    }
+    return;
+  }
   try {
     const res = await fetch("/api/history/" + modelId, { method: "DELETE" });
     if (!res.ok) throw new Error(I18N.errText(await res.text()));
@@ -1966,10 +2156,26 @@ function renderAsrPanel(m) {
   $("asr-stats").textContent = "";
 }
 
+/* ASR 结果渲染（任务完成后由 renderTaskResult 调用） */
+function renderAsrResult(json) {
+  $("asr-text").textContent = json.text || t("asr.noText");
+  const details = {};
+  for (const k of ["language", "words", "segments", "speaker_turns", "timing"]) {
+    if (json[k] !== undefined) details[k] = json[k];
+  }
+  const det = $("asr-json-details");
+  if (Object.keys(details).length > 0) {
+    $("asr-json").textContent = JSON.stringify(details, null, 2);
+    det.classList.remove("hidden");
+  } else {
+    det.classList.add("hidden");
+  }
+  $("asr-result").classList.remove("hidden");
+}
+
 $("asr-submit").onclick = async () => {
   const m = selectedModel();
   const msg = $("asr-msg");
-  const btn = $("asr-submit");
   msg.textContent = "";
   $("asr-result").classList.add("hidden");
   if (!activeInstanceId) { msg.textContent = t("instance.noReady"); return; }
@@ -1983,33 +2189,12 @@ $("asr-submit").onclick = async () => {
   if (ctxText && ctxText.value.trim()) req.text = ctxText.value.trim();
   collectParams(m, "asr-adv", req);
 
-  btn.disabled = true;
-  btn.textContent = t("asr.running");
-  const stats = $("asr-stats");
-  stats.textContent = "";
-  const start = showBusy(t("asr.busy"));
+  // 异步任务：提交即返回，进度/结果由 trackTask 轮询处理
+  $("asr-stats").textContent = "";
   try {
-    const json = await runTask(req);
-    $("asr-text").textContent = json.text || t("asr.noText");
-    const details = {};
-    for (const k of ["language", "words", "segments", "speaker_turns", "timing"]) {
-      if (json[k] !== undefined) details[k] = json[k];
-    }
-    const det = $("asr-json-details");
-    if (Object.keys(details).length > 0) {
-      $("asr-json").textContent = JSON.stringify(details, null, 2);
-      det.classList.remove("hidden");
-    } else {
-      det.classList.add("hidden");
-    }
-    $("asr-result").classList.remove("hidden");
-    stats.textContent = t("common.doneElapsed", { verb: t("asr.verb"), t: fmtElapsed(start) });
+    trackTask(await submitTask(req));
   } catch (e) {
-    msg.textContent = t("common.failedElapsed", { verb: t("asr.verb"), t: fmtElapsed(start), msg: e.message });
-  } finally {
-    hideBusy();
-    btn.disabled = false;
-    btn.textContent = submitLabel("asr-submit");
+    msg.textContent = e.message;
   }
 };
 
@@ -2027,9 +2212,22 @@ function renderSepPanel(m) {
   $("sep-stats").textContent = "";
 }
 
+/* SEP 结果渲染（任务完成后由 renderTaskResult 调用） */
+function renderSepResult(json) {
+  const result = $("sep-result");
+  if (json.named_audio_outputs && json.named_audio_outputs.length > 0) {
+    for (const track of json.named_audio_outputs) {
+      result.appendChild(makeTrackRow(track.id, track.audio));
+    }
+  } else if (json.audio) {
+    result.appendChild(makeTrackRow("output", json.audio));
+  } else {
+    $("sep-msg").textContent = t("sep.noTracks") + JSON.stringify(json).substring(0, 300);
+  }
+}
+
 $("sep-submit").onclick = async () => {
   const msg = $("sep-msg");
-  const btn = $("sep-submit");
   msg.textContent = "";
   clearResult($("sep-result"));
   if (!activeInstanceId) { msg.textContent = t("instance.noReady"); return; }
@@ -2037,31 +2235,12 @@ $("sep-submit").onclick = async () => {
   const audio = sepAudioPicker.getValue();
   if (!audio) { msg.textContent = t("sep.errNoAudio"); return; }
 
-  btn.disabled = true;
-  btn.textContent = t("sep.running");
-  const stats = $("sep-stats");
-  stats.textContent = "";
-  const start = showBusy(t("sep.busy"));
+  // 异步任务：提交即返回，进度/结果由 trackTask 轮询处理
+  $("sep-stats").textContent = "";
   try {
-    const json = await runTask({ audio });
-    const result = $("sep-result");
-    if (json.named_audio_outputs && json.named_audio_outputs.length > 0) {
-      for (const track of json.named_audio_outputs) {
-        result.appendChild(makeTrackRow(track.id, track.audio));
-      }
-      stats.textContent = t("common.doneElapsed", { verb: t("sep.verb"), t: fmtElapsed(start) });
-    } else if (json.audio) {
-      result.appendChild(makeTrackRow("output", json.audio));
-      stats.textContent = t("common.doneElapsed", { verb: t("sep.verb"), t: fmtElapsed(start) });
-    } else {
-      msg.textContent = t("sep.noTracks") + JSON.stringify(json).substring(0, 300);
-    }
+    trackTask(await submitTask({ audio }));
   } catch (e) {
-    msg.textContent = t("common.failedElapsed", { verb: t("sep.verb"), t: fmtElapsed(start), msg: e.message });
-  } finally {
-    hideBusy();
-    btn.disabled = false;
-    btn.textContent = submitLabel("sep-submit");
+    msg.textContent = e.message;
   }
 };
 
@@ -2095,7 +2274,6 @@ function renderOtherPanel(m) {
 $("other-submit").onclick = async () => {
   const m = selectedModel();
   const msg = $("other-msg");
-  const btn = $("other-submit");
   msg.textContent = "";
   clearResult($("other-result"));
   if (!activeInstanceId) { msg.textContent = t("instance.noReady"); return; }
@@ -2119,15 +2297,18 @@ $("other-submit").onclick = async () => {
   }
   if (otherLanguageSel && otherLanguageSel.value) req.language = otherLanguageSel.value;
 
-  // paramSchema 字段
+  // paramSchema 字段：与 TTS/ASR 面板一致，放进 options 透传（服务端顶层只认白名单，
+  // 如 stable_audio 的 negative_prompt 放顶层会被静默丢弃）；
+  // RESERVED_KEYS（task_route 等）在服务端有顶层专有映射（task_route→options.route、路径解析等），保持顶层
   for (const [key, p] of Object.entries(m.paramSchema || {})) {
     if (!p || Array.isArray(p) || !p.type) continue;
     const input = $(`other-field-${key}`);
     if (!input) continue;
-    if (p.type === "boolean") { req[key] = input.checked; continue; }
+    const target = RESERVED_KEYS.has(key) ? req : (req.options || (req.options = {}));
+    if (p.type === "boolean") { target[key] = input.checked; continue; }
     const v = String(input.value).trim();
     if (v === "") continue;
-    req[key] = (p.type === "string" || p.type === "enum") ? v
+    target[key] = (p.type === "string" || p.type === "enum") ? v
       : (p.type === "integer" ? parseInt(v, 10) : parseFloat(v));
   }
 
@@ -2142,46 +2323,42 @@ $("other-submit").onclick = async () => {
     }
   }
 
-  btn.disabled = true;
-  btn.textContent = t("other.running");
-  const stats = $("other-stats");
-  stats.textContent = "";
-  const start = showBusy(t("other.busy"));
+  // 异步任务：提交即返回，进度/结果由 trackTask 轮询处理
+  $("other-stats").textContent = "";
   try {
-    const json = await runTask(req);
-    const out = $("other-result");
-    if (json.named_audio_outputs && json.named_audio_outputs.length > 0) {
-      for (const track of json.named_audio_outputs) {
-        out.appendChild(makeTrackRow(track.id, track.audio));
-      }
-    }
-    if (json.audio) {
-      out.appendChild(makeTrackRow("output", json.audio));
-    }
-    // JSON 摘要（剔除巨大的 base64 字段）
-    const summary = {};
-    for (const [k, v] of Object.entries(json)) {
-      if (k === "audio") continue;
-      if (k === "named_audio_outputs") {
-        summary[k] = v.map(tr => ({ id: tr.id, sample_rate: tr.sample_rate, channels: tr.channels }));
-        continue;
-      }
-      summary[k] = v;
-    }
-    if (Object.keys(summary).length > 0 || (!json.audio && !json.named_audio_outputs)) {
-      const pre = el(`<pre class="json-pre"></pre>`);
-      pre.textContent = JSON.stringify(summary, null, 2);
-      out.appendChild(pre);
-    }
-    stats.textContent = t("common.doneElapsed", { verb: t("other.verb"), t: fmtElapsed(start) });
+    trackTask(await submitTask(req));
   } catch (e) {
-    msg.textContent = t("common.failedElapsed", { verb: t("other.verb"), t: fmtElapsed(start), msg: e.message });
-  } finally {
-    hideBusy();
-    btn.disabled = false;
-    btn.textContent = submitLabel("other-submit");
+    msg.textContent = e.message;
   }
 };
+
+/* OTHER 结果渲染（任务完成后由 renderTaskResult 调用） */
+function renderOtherResult(json) {
+  const out = $("other-result");
+  if (json.named_audio_outputs && json.named_audio_outputs.length > 0) {
+    for (const track of json.named_audio_outputs) {
+      out.appendChild(makeTrackRow(track.id, track.audio));
+    }
+  }
+  if (json.audio) {
+    out.appendChild(makeTrackRow("output", json.audio));
+  }
+  // JSON 摘要（剔除巨大的 base64 字段）
+  const summary = {};
+  for (const [k, v] of Object.entries(json)) {
+    if (k === "audio") continue;
+    if (k === "named_audio_outputs") {
+      summary[k] = v.map(tr => ({ id: tr.id, sample_rate: tr.sample_rate, channels: tr.channels }));
+      continue;
+    }
+    summary[k] = v;
+  }
+  if (Object.keys(summary).length > 0 || (!json.audio && !json.named_audio_outputs)) {
+    const pre = el(`<pre class="json-pre"></pre>`);
+    pre.textContent = JSON.stringify(summary, null, 2);
+    out.appendChild(pre);
+  }
+}
 
 /* ---------- 初始化 ---------- */
 const voicePicker = new AudioPicker($("voice-picker"), "picker.speakerRef");
