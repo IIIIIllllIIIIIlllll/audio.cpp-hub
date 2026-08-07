@@ -101,7 +101,7 @@ public class DownloadManager {
         this.pool = Executors.newFixedThreadPool(Math.max(1, config.downloadThreads), r -> {
             Thread t = new Thread(r);
             t.setDaemon(true);
-            t.setName("download-segment-" + t.getId());
+            t.setName("download-segment-" + t.getName());
             return t;
         });
         this.httpClient = HttpClient.newBuilder()

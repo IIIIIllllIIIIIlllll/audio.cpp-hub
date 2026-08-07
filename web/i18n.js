@@ -137,6 +137,10 @@ window.I18N = (() => {
     "history.listFailed": "历史列表加载失败",
     "history.closeTitle": "关闭",
     "history.fabTitle": "操作历史",
+    "history.masked": "今天天气真不错，适合出门走走。",
+    "history.privacyBtn": "隐私",
+    "history.privacyOn": "隐私模式已开启：历史文本已隐藏，点击关闭",
+    "history.privacyOff": "隐私模式：隐藏历史记录中的文本",
     /* ---------- 情感控制 ---------- */
     "emotion.tab.none": "无",
     "emotion.tab.emotion_audio": "情感参考音频",
@@ -563,6 +567,10 @@ window.I18N = (() => {
     "history.listFailed": "Failed to load history list",
     "history.closeTitle": "Close",
     "history.fabTitle": "History",
+    "history.masked": "Lovely weather today, perfect for a walk outside.",
+    "history.privacyBtn": "Privacy",
+    "history.privacyOn": "Privacy mode on: history texts hidden, click to turn off",
+    "history.privacyOff": "Privacy mode: hide texts in history records",
     /* ---------- emotion control ---------- */
     "emotion.tab.none": "None",
     "emotion.tab.emotion_audio": "Emotion reference audio",

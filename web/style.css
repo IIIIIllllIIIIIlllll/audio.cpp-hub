@@ -1157,6 +1157,8 @@ footer { padding: 4px 24px 18px; }
 .history-actions { display: flex; gap: 8px; align-items: center; }
 .history-actions button,
 .history-actions .btn-ghost { padding: 4px 12px; font-size: 12px; }
+/* 隐私模式开启时按钮反色填充，与默认幽灵样式区分 */
+#history-privacy.active { background: var(--accent); color: #fff; }
 #history-list {
   flex: 1;
   min-height: 0;

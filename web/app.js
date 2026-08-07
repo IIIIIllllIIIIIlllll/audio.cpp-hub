@@ -108,6 +108,31 @@ $("history-fab").onclick = openHistoryDrawer;
 $("history-overlay").onclick = closeHistoryDrawer;
 $("history-close").onclick = closeHistoryDrawer;
 
+/* ---------- 隐私模式：隐藏历史记录中的提示词，用无关占位文字替代（localStorage hub-privacy 持久化） ---------- */
+function privacyOn() {
+  return localStorage.getItem("hub-privacy") === "1";
+}
+/* 按当前隐私模式刷新历史列表中所有文本预览与切换按钮状态；真实文本保存在 dataset.realText 中 */
+function applyHistoryPrivacy() {
+  const btn = $("history-privacy");
+  btn.textContent = t("history.privacyBtn");
+  btn.classList.toggle("active", privacyOn());
+  btn.title = privacyOn() ? t("history.privacyOn") : t("history.privacyOff");
+  for (const textEl of document.querySelectorAll("#history-list .history-text")) {
+    const real = textEl.dataset.realText || "";
+    textEl.textContent = privacyOn() && real ? t("history.masked") : real || t("history.noText");
+    if (!privacyOn() && real) textEl.title = real;
+    else textEl.removeAttribute("title");
+  }
+}
+$("history-privacy").onclick = () => {
+  localStorage.setItem("hub-privacy", privacyOn() ? "0" : "1");
+  applyHistoryPrivacy();
+};
+// 语言切换后占位文字与按钮 title 需随语言刷新
+I18N.onChange(applyHistoryPrivacy);
+applyHistoryPrivacy();
+
 /* ---------- 模型列表（按 category 分组） ---------- */
 async function loadModels() {
   const res = await fetch("/api/models");
@@ -1746,8 +1771,10 @@ function makeHistoryRow(item) {
   const timeEl = row.querySelector(".history-time");
   timeEl.textContent = new Date(item.time).toLocaleString();
   const textEl = row.querySelector(".history-text");
-  textEl.textContent = item.text || t("history.noText");
-  if (item.text) textEl.title = item.text;
+  // 真实文本存 dataset，隐私模式切换时由 applyHistoryPrivacy 恢复/遮蔽
+  textEl.dataset.realText = item.text || "";
+  textEl.textContent = privacyOn() && item.text ? t("history.masked") : item.text || t("history.noText");
+  if (item.text && !privacyOn()) textEl.title = item.text;
   const meta = [];
   if (item.ok && item.result) {
     if (item.result.durationSec != null) meta.push(item.result.durationSec.toFixed(1) + "s");
