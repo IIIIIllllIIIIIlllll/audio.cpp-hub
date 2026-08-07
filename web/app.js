@@ -1815,6 +1815,11 @@ function historyModelId() {
 /* 当前模型的 TTS 历史记录（非 TTS 恒为空数组），由 loadHistory 维护，renderSidebarList 消费 */
 let sidebarHistoryItems = [];
 
+/* 侧栏行节点缓存：key → { node, sig }。任务轮询每 2s 调一次 renderSidebarList，
+   若每次 innerHTML 全量重建，正在播放的历史 audio 会被销毁中断；
+   改为按数据签名复用已渲染节点，仅数据变化/增删时才动 DOM */
+const sidebarRows = new Map();
+
 async function loadHistory() {
   const block = $("history-sidebar");
   const modelId = historyModelId();
@@ -1854,28 +1859,57 @@ async function loadHistory() {
   renderSidebarList();
 }
 
-/* 侧栏合并渲染：进行中任务（创建时间升序）→ 已结束任务（新→旧，TTS 已被历史代表的去重）→ TTS 历史 */
+/* 任务行渲染签名：数据不变即复用节点；RUNNING 附带整秒耗时让计时继续走（秒级变化才重建该行）。
+   ctx 为「隐私模式 + 界面语言」，切换后签名变化触发整行重建以刷新文案 */
+function taskRowSig(task, ctx) {
+  return JSON.stringify([task.status, task.position, task.createdAt, task.startedAt, task.finishedAt,
+    task.text, task.instanceName, task.error, taskDetails.has(task.id), ctx,
+    task.status === "RUNNING" ? Math.floor((Date.now() - (task.startedAt || task.createdAt)) / 1000) : 0]);
+}
+
+/* 侧栏合并渲染：进行中任务（创建时间升序）→ 已结束任务（新→旧，TTS 已被历史代表的去重）→ TTS 历史。
+   按签名复用行节点并按序对齐 DOM：位置不变的行不做任何 DOM 操作，
+   避免轮询重渲染打断历史行中正在播放的音频 */
 function renderSidebarList() {
   const list = $("history-list");
   const modelId = historyModelId();
   if (!modelId) return;
-  list.innerHTML = "";
   const tasks = [...taskViews.values()].filter(x => x.modelId === modelId);
   const active = tasks.filter(x => x.status === "QUEUED" || x.status === "RUNNING")
     .sort((a, b) => a.createdAt - b.createdAt);
   const finished = tasks.filter(x => x.status !== "QUEUED" && x.status !== "RUNNING")
     .sort((a, b) => (b.finishedAt || b.createdAt) - (a.finishedAt || a.createdAt));
   const historyIds = new Set(sidebarHistoryItems.map(i => i.taskId));
-  let rows = 0;
-  for (const task of active) { list.appendChild(makeTaskRow(task)); rows++; }
+  const ctx = privacyOn() + ":" + I18N.lang();
+  const desired = [];
+  const used = new Set();
+  const pushRow = (key, sig, make) => {
+    used.add(key);
+    const cached = sidebarRows.get(key);
+    if (cached && cached.sig === sig) { desired.push(cached.node); return; }
+    const node = make();
+    sidebarRows.set(key, { node, sig });
+    desired.push(node);
+  };
+  for (const task of active) {
+    pushRow("t:" + task.id, taskRowSig(task, ctx), () => makeTaskRow(task));
+  }
   for (const task of finished) {
     // TTS 成功/失败都已写历史，由历史行代表；CANCELLED 无历史记录，仍需显示
     if (task.category === "tts" && historyIds.has(task.id)) continue;
-    list.appendChild(makeTaskRow(task));
-    rows++;
+    pushRow("t:" + task.id, taskRowSig(task, ctx), () => makeTaskRow(task));
   }
-  for (const item of sidebarHistoryItems) { list.appendChild(makeHistoryRow(item)); rows++; }
-  if (!rows) list.appendChild(el(`<div class="hint history-empty">${t("history.empty")}</div>`));
+  for (const item of sidebarHistoryItems) {
+    pushRow("h:" + modelId + ":" + item.taskId, JSON.stringify([item, ctx]), () => makeHistoryRow(item));
+  }
+  // 清理不再展示的行缓存（删记录/切模型/任务淘汰）
+  for (const key of sidebarRows.keys()) if (!used.has(key)) sidebarRows.delete(key);
+  // 按序对齐：仅当某位置节点不符时才 insertBefore（同文档内移动节点不会中断媒体播放）
+  for (let i = 0; i < desired.length; i++) {
+    if (list.children[i] !== desired[i]) list.insertBefore(desired[i], list.children[i] || null);
+  }
+  while (list.children.length > desired.length) list.removeChild(list.lastChild);
+  if (!desired.length) list.appendChild(el(`<div class="hint history-empty">${t("history.empty")}</div>`));
 }
 
 /* 单行任务：复用 history-row 结构。进行中显示状态与「取消」；DONE 非 TTS 可「载入」重新渲染结果；
