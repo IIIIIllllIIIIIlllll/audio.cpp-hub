@@ -151,6 +151,9 @@ window.I18N = (() => {
     "task.cancelled": "已取消",
     "task.failed": "任务失败",
     "task.resultFailed": "结果获取失败",
+    "task.detail": "详情",
+    "task.collapse": "收起",
+    "task.noDetail": "该任务没有可查看的文本结果",
     /* ---------- 情感控制 ---------- */
     "emotion.tab.none": "无",
     "emotion.tab.emotion_audio": "情感参考音频",
@@ -591,6 +594,9 @@ window.I18N = (() => {
     "task.cancelled": "Cancelled",
     "task.failed": "Task failed",
     "task.resultFailed": "Failed to fetch result",
+    "task.detail": "Details",
+    "task.collapse": "Collapse",
+    "task.noDetail": "This task has no text result to show",
     /* ---------- emotion control ---------- */
     "emotion.tab.none": "None",
     "emotion.tab.emotion_audio": "Emotion reference audio",

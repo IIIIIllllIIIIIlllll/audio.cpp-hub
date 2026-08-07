@@ -7,7 +7,8 @@ import java.nio.file.Path;
 import java.util.concurrent.Future;
 
 /**
- * 一个异步推理任务（POST /api/tasks 创建）。状态纯内存，hub 重启即丢。
+ * 一个异步推理任务（POST /api/tasks 创建）。状态由 TaskManager 落盘
+ * data/tasks/<id>.task.json，hub 重启后回放（进行中标记为 CANCELLED）。
  * TTS 任务的 id 同时是历史记录 id（结果音频在 data/history/<modelId>/<id>.wav）；
  * 非 TTS 任务的结果 JSON 落盘 data/tasks/<id>.result.json。
  */
@@ -25,7 +26,7 @@ public class HubTask {
     public volatile Long startedAt;
     public volatile Long finishedAt;
     public volatile String error;
-    /** 文本预览（request.text 截断 100 字），侧栏记录展示用；无文本的任务为 null（不序列化）。 */
+    /** 文本预览（request.text 截断 100 字；请求无文本时回填结果 JSON 顶层 "text"，如 ASR 转写文本），侧栏记录展示用；无文本的任务为 null（不序列化）。 */
     public String text;
     /** TTS 成功时的结果元数据（durationSec/size/sampleRate 等），与历史记录中的 result 一致。 */
     public volatile JsonObject result;

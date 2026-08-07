@@ -1202,6 +1202,21 @@ footer { padding: 4px 24px 18px; }
 .history-error { margin-top: 4px; }
 /* 任务行（队列并入侧栏）：状态/耗时用主色，与历史记录的弱化 meta 区分 */
 .task-row .history-meta { color: var(--accent); font-weight: 600; }
+/* 任务「详情」展开区：完整结果文本，自动换行 + 限高滚动 */
+.task-detail {
+  margin-top: 6px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  user-select: text;
+}
 .history-player { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .history-player audio { flex: 1; height: 34px; min-width: 0; }
 .history-player .btn-ghost { flex: none; padding: 4px 12px; font-size: 12px; }

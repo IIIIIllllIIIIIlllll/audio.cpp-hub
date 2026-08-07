@@ -13,14 +13,19 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -29,8 +34,9 @@ import java.util.concurrent.Executors;
  * 推理任务管理器：提交 → 同实例串行排队执行 → 前端轮询结果。
  * <p>
  * 每个实例一个单线程 executor（与引擎 busy 锁的串行语义一致，多实例可并行）；
- * 无执行时长上限（区别于旧同步链路的 10 分钟硬超时）。状态纯内存，hub 重启即丢；
- * 非 TTS 结果落盘 data/tasks/&lt;id&gt;.result.json（启动时清空该目录）；
+ * 无执行时长上限（区别于旧同步链路的 10 分钟硬超时）。任务状态落盘
+ * data/tasks/&lt;id&gt;.task.json（每次状态变迁原子写），启动时回放重建——上次运行中断时
+ * 仍处于 QUEUED/RUNNING 的任务标记为 CANCELLED；非 TTS 结果落盘 data/tasks/&lt;id&gt;.result.json；
  * TTS 结果复用历史链路（taskId 即历史记录 id，音频经 GET /api/history/&lt;modelId&gt;/&lt;taskId&gt;/audio 提供）。
  * <p>
  * 取消：QUEUED 直接标记（worker 执行前会跳过）；RUNNING 中断 worker 线程的 HttpClient 等待
@@ -42,8 +48,14 @@ public class TaskManager {
     private static final Logger log = LoggerFactory.getLogger(TaskManager.class);
 
     private static final Path STATE_DIR = Path.of("data", "tasks");
+    /** 任务状态文件名后缀（<id>.task.json） */
+    private static final String TASK_SUFFIX = ".task.json";
+    /** 非 TTS 结果文件名后缀（<id>.result.json） */
+    private static final String RESULT_SUFFIX = ".result.json";
     /** 已完成任务在内存中的保留条数，超出淘汰最旧并删除其结果文件 */
     private static final int FINISHED_KEEP = 100;
+    /** 结果文本预览读取的结果文件大小上限（超出放弃预览，防止内嵌大 base64 的结果占内存） */
+    private static final long RESULT_PREVIEW_MAX_BYTES = 8L * 1024 * 1024;
 
     private final HistoryManager historyManager = new HistoryManager();
     private final SpeechForwarder forwarder = new SpeechForwarder();
@@ -53,18 +65,39 @@ public class TaskManager {
     private final Map<String, ExecutorService> executors = new HashMap<>();
 
     public TaskManager() {
-        // 任务状态纯内存，上次运行残留的结果文件没有意义，启动时清空
+        // 任务状态落盘 data/tasks/<id>.task.json，启动时回放重建（刷新/重启不再丢任务记录）：
+        // 上次运行中断时仍处于 QUEUED/RUNNING 的任务实际已随进程终止，回放时标记为 CANCELLED；
+        // 无对应任务状态的孤儿结果文件与落盘临时文件直接清理
         try {
-            if (Files.isDirectory(STATE_DIR)) {
-                try (var stream = Files.list(STATE_DIR)) {
-                    for (Path p : stream.toList()) {
+            Files.createDirectories(STATE_DIR);
+            Set<String> loaded = new HashSet<>();
+            try (var stream = Files.list(STATE_DIR)) {
+                for (Path p : stream.toList()) {
+                    if (!p.getFileName().toString().endsWith(TASK_SUFFIX)) {
+                        continue;
+                    }
+                    HubTask t = loadTask(p);
+                    if (t != null) {
+                        tasks.put(t.id, t);
+                        loaded.add(t.id);
+                    }
+                }
+            }
+            try (var stream = Files.list(STATE_DIR)) {
+                for (Path p : stream.toList()) {
+                    String name = p.getFileName().toString();
+                    if (name.endsWith(RESULT_SUFFIX)) {
+                        String id = name.substring(0, name.length() - RESULT_SUFFIX.length());
+                        if (!loaded.contains(id)) {
+                            deleteQuietly(p);
+                        }
+                    } else if (name.endsWith(".tmp")) {
                         deleteQuietly(p);
                     }
                 }
             }
-            Files.createDirectories(STATE_DIR);
         } catch (IOException e) {
-            log.warn("任务目录清理失败: {}", Jsons.summarize(e.getMessage()));
+            log.warn("任务状态回放失败: {}", Jsons.summarize(e.getMessage()));
         }
     }
 
@@ -87,6 +120,7 @@ public class TaskManager {
         t.instance = instance;
         t.requestJson = body;
         tasks.put(t.id, t);
+        persist(t);
         t.future = executorFor(t.instanceId).submit(() -> execute(t));
         log.info("任务已入队: {} (实例 {}, category {})", t.id, t.instanceName, t.category);
         return t;
@@ -107,11 +141,13 @@ public class TaskManager {
             if (t.future != null) {
                 t.future.cancel(true);
             }
+            persist(t);
             log.info("任务已取消: {}", id);
             return true;
         }
         tasks.remove(id);
         deleteQuietly(t.resultPath);
+        deleteQuietly(statePath(t.id));
         return true;
     }
 
@@ -178,13 +214,18 @@ public class TaskManager {
         }
         t.status = HubTask.Status.RUNNING;
         t.startedAt = System.currentTimeMillis();
+        persist(t);
         try {
             if ("tts".equals(t.category)) {
                 runTts(t);
             } else {
-                Path out = STATE_DIR.resolve(t.id + ".result.json");
+                Path out = STATE_DIR.resolve(t.id + RESULT_SUFFIX);
                 forwarder.forwardToFile(t.instance, t.requestJson, out);
                 t.resultPath = out;
+                // 请求侧无文本可预览时（如 ASR 输入是音频），回填结果 JSON 顶层的 "text"（识别出的文本）
+                if (t.text == null) {
+                    t.text = resultTextPreview(out);
+                }
             }
             // 执行末尾可能刚被 cancel() 标记为 CANCELLED，不覆盖
             if (t.status == HubTask.Status.RUNNING) {
@@ -205,6 +246,7 @@ public class TaskManager {
             if (t.finishedAt == null) {
                 t.finishedAt = System.currentTimeMillis();
             }
+            persist(t);
             evictFinished();
         }
     }
@@ -271,7 +313,32 @@ public class TaskManager {
         if (!req.has("text") || !req.get("text").isJsonPrimitive()) {
             return null;
         }
-        String text = req.get("text").getAsString();
+        return truncatePreview(req.get("text").getAsString());
+    }
+
+    /**
+     * 结果文本预览：非 TTS 结果 JSON 顶层 "text" 截断 100 字（如 ASR 的转写文本）。
+     * 文件超过上限（分离类结果内嵌 base64 音频，可能很大）/无该字段/解析失败返回 null。
+     */
+    private static String resultTextPreview(Path result) {
+        try {
+            if (result == null || !Files.isRegularFile(result) || Files.size(result) > RESULT_PREVIEW_MAX_BYTES) {
+                return null;
+            }
+            JsonObject json = Jsons.GSON.fromJson(Files.readString(result), JsonObject.class);
+            if (json == null || !json.has("text") || !json.get("text").isJsonPrimitive()) {
+                return null;
+            }
+            return truncatePreview(json.get("text").getAsString());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static String truncatePreview(String text) {
+        if (text == null) {
+            return null;
+        }
         return text.length() > 100 ? text.substring(0, 100) + "…" : text;
     }
 
@@ -284,7 +351,7 @@ public class TaskManager {
         }));
     }
 
-    /** 已完成任务超出保留上限时淘汰最旧（连带删除结果文件）。 */
+    /** 已完成任务超出保留上限时淘汰最旧（连带删除状态与结果文件）。 */
     private void evictFinished() {
         synchronized (this) {
             List<HubTask> finished = new ArrayList<>();
@@ -301,7 +368,54 @@ public class TaskManager {
                 HubTask t = finished.get(i);
                 tasks.remove(t.id);
                 deleteQuietly(t.resultPath);
+                deleteQuietly(statePath(t.id));
             }
+        }
+    }
+
+    // ------------------------------------------------------------------ 状态落盘
+
+    private static Path statePath(String id) {
+        return STATE_DIR.resolve(id + TASK_SUFFIX);
+    }
+
+    /** 任务状态原子落盘（先写临时文件再改名），失败只记日志不影响主流程。 */
+    private void persist(HubTask t) {
+        try {
+            Files.createDirectories(STATE_DIR);
+            Path tmp = STATE_DIR.resolve(t.id + TASK_SUFFIX + ".tmp");
+            Files.writeString(tmp, Jsons.GSON.toJson(t), StandardCharsets.UTF_8);
+            Path target = statePath(t.id);
+            try {
+                Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException e) {
+            log.warn("任务状态落盘失败: {}: {}", t.id, Jsons.summarize(e.getMessage()));
+        }
+    }
+
+    /** 回放单个任务状态文件；损坏返回 null。进行中的任务随上次进程终止已中断，标记为 CANCELLED。 */
+    private static HubTask loadTask(Path p) {
+        try {
+            HubTask t = Jsons.GSON.fromJson(Files.readString(p, StandardCharsets.UTF_8), HubTask.class);
+            if (t == null || t.id == null || t.modelId == null) {
+                return null;
+            }
+            if (t.status == null || t.active()) {
+                t.status = HubTask.Status.CANCELLED;
+            }
+            if (t.finishedAt == null && !t.active()) {
+                t.finishedAt = System.currentTimeMillis();
+            }
+            // instance/requestJson/future 不序列化，回放后为空：仅用于展示与结果读取，不能再执行
+            Path result = STATE_DIR.resolve(t.id + RESULT_SUFFIX);
+            t.resultPath = Files.isRegularFile(result) ? result : null;
+            return t;
+        } catch (Exception e) {
+            log.warn("跳过损坏的任务状态文件: {} ({})", p, Jsons.summarize(e.getMessage()));
+            return null;
         }
     }
 

@@ -1203,6 +1203,7 @@ function showToast(level, message) {
    任务生命周期不再绑定页面连接（旧 /api/run 同步链路保留兼容）。 */
 const activePolls = new Map(); // taskId → intervalId
 const taskViews = new Map(); // taskId → 已知任务（进行中 + 已完成保留展示），供侧栏渲染
+const taskDetails = new Map(); // taskId → 已展开的完整结果文本（侧栏「详情」缓存，随任务记录清除）
 const TASK_VERB = { tts: "tts.verb", asr: "asr.verb", sep: "sep.verb", other: "other.verb" };
 
 async function submitTask(req) {
@@ -1259,6 +1260,7 @@ function trackTask(task) {
         clearInterval(iv);
         activePolls.delete(task.id);
         taskViews.delete(task.id);
+        taskDetails.delete(task.id);
         renderSidebarList();
       }
       return; // 其余错误视为网络抖动，下轮再试
@@ -1917,6 +1919,17 @@ function makeTaskRow(task) {
     loadBtn.textContent = t("history.load");
     loadBtn.onclick = () => renderTaskResult(task);
     btns.appendChild(loadBtn);
+    const expanded = taskDetails.has(task.id);
+    const detailBtn = el(`<button type="button"></button>`);
+    detailBtn.textContent = expanded ? t("task.collapse") : t("task.detail");
+    detailBtn.onclick = () => toggleTaskDetail(task);
+    btns.appendChild(detailBtn);
+    if (expanded) {
+      // 展开态存于 taskDetails，轮询重渲染后仍保持展开；隐私模式下完整文本同样遮蔽
+      const detail = el(`<div class="task-detail"></div>`);
+      detail.textContent = privacyOn() ? t("history.masked") : taskDetails.get(task.id);
+      row.appendChild(detail);
+    }
   }
   if (task.status === "FAILED") {
     const err = el(`<div class="error-text history-error"></div>`);
@@ -1925,6 +1938,29 @@ function makeTaskRow(task) {
     row.appendChild(err);
   }
   return row;
+}
+
+/* 侧栏「详情」：拉取任务完整结果文本并在行内展开/收起（预览只截断 100 字，完整内容只能从这里看） */
+async function toggleTaskDetail(task) {
+  if (taskDetails.has(task.id)) {
+    taskDetails.delete(task.id);
+    renderSidebarList();
+    return;
+  }
+  try {
+    const res = await fetch("/api/tasks/" + task.id + "/result");
+    const text = await res.text();
+    if (!res.ok) throw new Error(I18N.errText(text));
+    const json = JSON.parse(text);
+    if (typeof json.text !== "string" || !json.text) {
+      showToast("info", t("task.noDetail"));
+      return;
+    }
+    taskDetails.set(task.id, json.text);
+    renderSidebarList();
+  } catch (e) {
+    showToast("error", t("task.resultFailed") + t("common.colon") + e.message);
+  }
 }
 
 /* 单行历史：信息行（时间 / 文本预览 / 时长与大小 / 按钮）+ 成功行内播放与下载；失败行红字显示 error */
@@ -2023,6 +2059,7 @@ $("history-clear").onclick = async () => {
         const res = await fetch("/api/tasks/" + task.id, { method: "DELETE" });
         if (!res.ok) throw new Error(I18N.errText(await res.text()));
         taskViews.delete(task.id);
+        taskDetails.delete(task.id);
       }
       renderSidebarList();
     } catch (e) {
