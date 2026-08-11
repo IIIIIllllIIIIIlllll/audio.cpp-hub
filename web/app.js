@@ -15,10 +15,11 @@ const SUBMIT_KEYS = { "tts-submit": "tts.submit", "asr-submit": "asr.submit", "s
 function submitLabel(id) {
   return t(SUBMIT_KEYS[id]);
 }
-/* 不从 paramSchema 自动渲染为高级参数的键（有专属 UI 或语义特殊） */
+/* 不从 paramSchema 自动渲染为高级参数的键（有专属 UI 或语义特殊）；
+   lang 在 TTS 枚举行渲染、收集时路由进 options（见 collectEnums） */
 const RESERVED_KEYS = new Set([
   "emotionModes", "emotionLabels", "emotion_alpha",
-  "text", "voice_ref", "language", "speaker", "instruct", "reference_text", "task_route"
+  "text", "voice_ref", "language", "speaker", "instruct", "reference_text", "task_route", "lang"
 ]);
 
 let models = [];
@@ -1427,15 +1428,17 @@ function schemaParams(m) {
 }
 
 function paramInput(key, p, prefix) {
+  // 标签默认用参数键名；paramSchema 可带 label/labelEn 双语显示名（I18N.pick 按语言选用）
+  const labelText = I18N.pick(p, "label") || key;
   if (p.type === "boolean") {
-    return el(`<label class="checkbox-label"><input type="checkbox" id="${prefix}-${key}" ${p.default ? "checked" : ""}> ${key}</label>`);
+    return el(`<label class="checkbox-label"><input type="checkbox" id="${prefix}-${key}" ${p.default ? "checked" : ""}> ${labelText}</label>`);
   }
   if (p.type === "string") {
     const ph = I18N.pick(p, "placeholder");
-    return el(`<label>${key}<input type="text" id="${prefix}-${key}" value="${p.default ?? ""}"${ph ? ` placeholder="${ph}"` : ""}></label>`);
+    return el(`<label>${labelText}<input type="text" id="${prefix}-${key}" value="${p.default ?? ""}"${ph ? ` placeholder="${ph}"` : ""}></label>`);
   }
   if (p.type === "enum") {
-    const label = el(`<label>${key}<select id="${prefix}-${key}"></select></label>`);
+    const label = el(`<label>${labelText}<select id="${prefix}-${key}"></select></label>`);
     const sel = label.querySelector("select");
     for (const v of p.values) {
       const opt = document.createElement("option");
@@ -1450,7 +1453,7 @@ function paramInput(key, p, prefix) {
   const min = p.min != null ? `min="${p.min}"` : "";
   const max = p.max != null ? `max="${p.max}"` : "";
   const val = p.default != null ? p.default : "";
-  return el(`<label>${key}<input type="number" id="${prefix}-${key}" value="${val}" ${min} ${max} step="${step}"></label>`);
+  return el(`<label>${labelText}<input type="number" id="${prefix}-${key}" value="${val}" ${min} ${max} step="${step}"></label>`);
 }
 
 function renderAdvancedGrid(container, m, prefix) {
@@ -1471,7 +1474,8 @@ function collectParams(m, prefix, req) {
     if (p.type === "boolean") { opts[key] = input.checked; continue; }
     const v = String(input.value).trim();
     if (v === "") continue;
-    opts[key] = p.type === "string" ? v : (p.type === "integer" ? parseInt(v, 10) : parseFloat(v));
+    // enum 与 string 一样按字符串透传（如 index_tts2_5 的 lang），数值类型才做转换
+    opts[key] = (p.type === "string" || p.type === "enum") ? v : (p.type === "integer" ? parseInt(v, 10) : parseFloat(v));
   }
 }
 
@@ -1480,7 +1484,11 @@ function collectEnums(m, prefix, req, exclude) {
   for (const [key, p] of Object.entries(s)) {
     if (!p || Array.isArray(p) || p.type !== "enum" || exclude.includes(key)) continue;
     const sel = $(`${prefix}-${key}`);
-    if (sel) req[key] = sel.value;
+    if (!sel) continue;
+    // lang 是引擎 request option（服务端顶层白名单无 lang，顶层会被静默丢弃），放进 options 透传；
+    // 其余 enum（如 supertonic 的 voice_id）维持顶层路径不变
+    const target = key === "lang" ? (req.options || (req.options = {})) : req;
+    target[key] = sel.value;
   }
 }
 
@@ -1628,6 +1636,7 @@ function renderTtsPanel(m) {
   if (rtInput && m.family === "omnivoice") {
     rtInput.placeholder = t("tts.refTextPlaceholderRequired");
   }
+  // lang 在本行渲染（显眼位置），收集时由 collectEnums 路由进 req.options
   renderEnumRow($("tts-enum-row"), m, "tts-enum", ["language", "speaker"]);
 
   $("tts-emotion-block").classList.toggle("hidden", !(m.paramSchema && m.paramSchema.emotionModes));
@@ -1736,7 +1745,7 @@ $("tts-submit").onclick = async () => {
 
   collectEnums(m, "tts-enum", req, ["language", "speaker"]);
 
-  // 情感控制（仅 index_tts2；除情感参考音频走顶层 audio 外，其余通过 options 透传给引擎）
+  // 情感控制（index_tts2 / index_tts2_5；除情感参考音频走顶层 audio 外，其余通过 options 透传给引擎）
   if (m.paramSchema && m.paramSchema.emotionModes) {
     const opts = req.options || (req.options = {});
     if (emotionMode === "emotion_audio") {
@@ -1767,7 +1776,7 @@ $("tts-submit").onclick = async () => {
   }
 };
 
-/* ---------- 情感模式 Tab（index_tts2） ---------- */
+/* ---------- 情感模式 Tab（index_tts2 / index_tts2_5） ---------- */
 document.querySelectorAll("#tts-emotion-block .tab").forEach(tab => {
   tab.onclick = () => {
     emotionMode = tab.dataset.mode;
@@ -2072,6 +2081,12 @@ async function deleteHistoryItem(taskId) {
   try {
     const res = await fetch("/api/history/" + modelId + "/" + taskId, { method: "DELETE" });
     if (!res.ok) throw new Error(I18N.errText(await res.text()));
+    // 对应的任务记录一并删除：否则侧栏去重失效，该行会以无按钮的「已完成」任务行复活
+    //（旧 /api/run 同步链路的历史没有任务记录，404 属正常）
+    const taskRes = await fetch("/api/tasks/" + taskId, { method: "DELETE" });
+    if (!taskRes.ok && taskRes.status !== 404) throw new Error(I18N.errText(await taskRes.text()));
+    taskViews.delete(taskId);
+    taskDetails.delete(taskId);
     loadHistory();
   } catch (e) {
     showToast("error", t("history.deleteFailed") + t("common.colon") + e.message);
@@ -2080,21 +2095,27 @@ async function deleteHistoryItem(taskId) {
 
 $("history-refresh").onclick = loadHistory;
 
+/* 删除该模型全部已结束任务记录（进行中的保留）：清空历史/侧栏时随历史一并清理，
+   否则历史没了任务记录还在，去重失效后它们会以无按钮的任务行“复活”。404 视为已淘汰，照常收尾 */
+async function deleteFinishedTasks(modelId) {
+  const finished = [...taskViews.values()].filter(x =>
+    x.modelId === modelId && x.status !== "QUEUED" && x.status !== "RUNNING");
+  for (const task of finished) {
+    const res = await fetch("/api/tasks/" + task.id, { method: "DELETE" });
+    if (!res.ok && res.status !== 404) throw new Error(I18N.errText(await res.text()));
+    taskViews.delete(task.id);
+    taskDetails.delete(task.id);
+  }
+}
+
 $("history-clear").onclick = async () => {
   const modelId = historyModelId();
   const m = selectedModel();
   if (!modelId || !m || !window.confirm(t("history.confirmClear"))) return;
   if (m.category !== "tts") {
-    // 非 TTS 无落盘历史：逐个删除该模型已结束的任务记录（进行中的保留）
-    const finished = [...taskViews.values()].filter(x =>
-      x.modelId === modelId && x.status !== "QUEUED" && x.status !== "RUNNING");
+    // 非 TTS 无落盘历史：只删该模型已结束的任务记录
     try {
-      for (const task of finished) {
-        const res = await fetch("/api/tasks/" + task.id, { method: "DELETE" });
-        if (!res.ok) throw new Error(I18N.errText(await res.text()));
-        taskViews.delete(task.id);
-        taskDetails.delete(task.id);
-      }
+      await deleteFinishedTasks(modelId);
       renderSidebarList();
     } catch (e) {
       showToast("error", t("history.clearFailed") + t("common.colon") + e.message);
@@ -2104,6 +2125,7 @@ $("history-clear").onclick = async () => {
   try {
     const res = await fetch("/api/history/" + modelId, { method: "DELETE" });
     if (!res.ok) throw new Error(I18N.errText(await res.text()));
+    await deleteFinishedTasks(modelId);
     loadHistory();
   } catch (e) {
     showToast("error", t("history.clearFailed") + t("common.colon") + e.message);

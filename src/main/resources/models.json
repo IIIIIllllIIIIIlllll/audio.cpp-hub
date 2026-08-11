@@ -40,6 +40,45 @@
     }
   },
   {
+    "id": "index_tts2_5",
+    "family": "index_tts2_5",
+    "hfUrl": "https://huggingface.co/IndexTeam/IndexTTS-2.5",
+    "ggufUrl": "https://huggingface.co/audio-cpp/audio.cpp-gguf/tree/main/IndexTTS2.5-GGUF",
+    "displayName": "Index TTS 2.5",
+    "description": "IndexTTS2.5 多语言零样本语音合成（中 / 英 / 日 / 西 / 阿）：参考音频克隆音色，音色-情感解耦，支持情感参考音频 / 情感向量 / 情感文本三种情感控制与 <文字|发音> 发音控制，输出 22050Hz 单声道 WAV。",
+    "descriptionEn": "IndexTTS2.5 multilingual zero-shot TTS (Chinese / English / Japanese / Spanish / Arabic): clones the voice from a reference audio with timbre-emotion decoupling, supports emotion control via emotion reference audio / emotion vector / emotion text and inline <text|pronunciation> pronunciation control, outputs 22050Hz mono WAV.",
+    "category": "tts",
+    "serverTask": "tts",
+    "modes": ["offline"],
+    "inputs": { "text": "required", "audio": "none", "voiceRef": "required" },
+    "outputType": "audio",
+    "task": "tts",
+    "requiredFiles": [
+      "config.yaml",
+      "multilingual_zh_ja_yue_char_del.tiktoken",
+      "w2v-bert-2.0/",
+      "bigvgan/",
+      "qwen0.6bemo4-merge/"
+    ],
+    "backends": ["cpu", "cuda", "vulkan", "metal"],
+    "paramSchema": {
+      "emotionModes": ["none", "emotion_audio", "emotion_vector", "emotion_text"],
+      "emotionLabels": ["高兴", "愤怒", "悲伤", "恐惧", "反感", "低落", "惊讶", "自然"],
+      "emotionLabelsEn": ["Happy", "Angry", "Sad", "Fearful", "Disgusted", "Melancholic", "Surprised", "Calm"],
+      "text": { "type": "string", "required": true },
+      "voice_ref": { "type": "path", "required": true, "hint": "运行 hub 的机器上的本地 wav 路径", "hintEn": "Local wav path on the machine running the hub" },
+      "lang": { "type": "enum", "values": ["auto", "zh", "en", "ja", "es", "ar"], "default": "auto", "label": "文本语言 lang", "labelEn": "Text language (lang)" },
+      "emotion_alpha": { "type": "number", "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05 },
+      "temperature": { "type": "number", "default": 0.8, "min": 0.1, "max": 2.0, "step": 0.05 },
+      "top_p": { "type": "number", "default": 0.8, "min": 0.0, "max": 1.0, "step": 0.05 },
+      "top_k": { "type": "integer", "default": 30, "min": 0, "max": 100, "step": 1 },
+      "repetition_penalty": { "type": "number", "default": 10.0, "min": 1.0, "max": 20.0, "step": 0.5 },
+      "max_tokens": { "type": "integer", "default": 1500, "min": 50, "max": 8192, "step": 50 },
+      "interval_silence_ms": { "type": "integer", "default": 200, "min": 0, "max": 5000, "step": 50 },
+      "seed": { "type": "integer", "default": null, "min": 0, "max": 2147483647, "step": 1 }
+    }
+  },
+  {
     "id": "citrinet_asr",
     "family": "citrinet_asr",
     "displayName": "Citrinet ASR",

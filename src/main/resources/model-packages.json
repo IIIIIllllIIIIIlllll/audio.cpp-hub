@@ -671,6 +671,62 @@
       }
     ]
   },
+  "index_tts2_5": {
+    "displayName": "IndexTTS2.5",
+    "category": "tts",
+    "status": "supported",
+    "packages": [
+      {
+        "id": "index_tts2_5_q8_0",
+        "displayName": "IndexTTS2.5 Q8_0 GGUF",
+        "format": "gguf",
+        "precision": "q8_0",
+        "default": true,
+        "repo": "audio-cpp/audio.cpp-gguf",
+        "revision": "main",
+        "gated": false,
+        "targetDir": "IndexTTS2.5-GGUF",
+        "files": [
+          {
+            "remote": "IndexTTS2.5-GGUF/index-tts2_5-q8_0.gguf",
+            "local": "index-tts2_5-q8_0.gguf"
+          }
+        ]
+      },
+      {
+        "id": "index_tts2_5_f16",
+        "displayName": "IndexTTS2.5 F16 GGUF",
+        "format": "gguf",
+        "precision": "f16",
+        "repo": "audio-cpp/audio.cpp-gguf",
+        "revision": "main",
+        "gated": false,
+        "targetDir": "IndexTTS2.5-GGUF",
+        "files": [
+          {
+            "remote": "IndexTTS2.5-GGUF/index-tts2_5-f16.gguf",
+            "local": "index-tts2_5-f16.gguf"
+          }
+        ]
+      },
+      {
+        "id": "index_tts2_5_orig",
+        "displayName": "IndexTTS2.5 Original-Dtype GGUF",
+        "format": "gguf",
+        "precision": "orig",
+        "repo": "audio-cpp/audio.cpp-gguf",
+        "revision": "main",
+        "gated": false,
+        "targetDir": "IndexTTS2.5-GGUF",
+        "files": [
+          {
+            "remote": "IndexTTS2.5-GGUF/index-tts2_5-orig.gguf",
+            "local": "index-tts2_5-orig.gguf"
+          }
+        ]
+      }
+    ]
+  },
   "inflect_v2": {
     "displayName": "Inflect Micro v2",
     "category": "tts",
