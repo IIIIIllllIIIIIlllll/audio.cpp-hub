@@ -41,7 +41,7 @@
   },
   {
     "id": "index_tts2_5",
-    "family": "index_tts2_5",
+    "family": "index_tts2",
     "hfUrl": "https://huggingface.co/IndexTeam/IndexTTS-2.5",
     "ggufUrl": "https://huggingface.co/audio-cpp/audio.cpp-gguf/tree/main/IndexTTS2.5-GGUF",
     "displayName": "Index TTS 2.5",

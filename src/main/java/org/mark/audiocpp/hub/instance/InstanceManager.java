@@ -92,6 +92,19 @@ public class InstanceManager {
                                Integer device, Integer requestedPort, Integer threads,
                                String executablePath, String executableName, String serverTask,
                                Map<String, String> env, String instanceName) throws IOException {
+        return start(modelId, modelId, weightsPath, backend, device, requestedPort, threads,
+                executablePath, executableName, serverTask, env, instanceName);
+    }
+
+    /**
+     * 同 {@link #start(String, String, String, Integer, Integer, Integer, String, String, String, Map, String)}，
+     * 但显式指定写入 server.json 的引擎 family（models.json 条目的 family 字段）。
+     * hub 内部 modelId 与引擎 family 解耦：一个 family 可有多个 variant 模型条目。
+     */
+    public ModelInstance start(String modelId, String engineFamily, String weightsPath, String backend,
+                               Integer device, Integer requestedPort, Integer threads,
+                               String executablePath, String executableName, String serverTask,
+                               Map<String, String> env, String instanceName) throws IOException {
         if (instanceName == null || instanceName.isBlank()) {
             instanceName = modelId;
         }
@@ -114,7 +127,7 @@ public class InstanceManager {
             Files.createDirectories(dir);
             Path serverJson = dir.resolve("server.json");
             ServerConfigWriter.write(serverJson, "127.0.0.1", port, backend, device, threads,
-                    instanceName, modelId, weightsPath, serverTask);
+                    instanceName, engineFamily, weightsPath, serverTask);
 
             Path logFile = dir.resolve("server.log");
             ProcessBuilder pb = new ProcessBuilder(executablePath, "--config", serverJson.toAbsolutePath().toString());

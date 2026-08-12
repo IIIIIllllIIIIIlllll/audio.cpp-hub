@@ -15,10 +15,13 @@ public final class ServerConfigWriter {
     private ServerConfigWriter() {}
 
     public static void write(Path path, String host, int port, String backend, Integer device, Integer threads,
-                             String instanceName, String modelId, String weightsPath, String task) throws IOException {
+                             String instanceName, String engineFamily, String weightsPath, String task) throws IOException {
         JsonObject model = new JsonObject();
         model.addProperty("id", instanceName);
-        model.addProperty("family", modelId);
+        // engineFamily 是引擎侧 family（models.json 的 family 字段），与 hub 内部 modelId 解耦：
+        // 同一 family 的多个 variant（如 index_tts2 的 v2 / v2.5）共享一个 engine family，
+        // 由权重 config 的 version 字段区分。
+        model.addProperty("family", engineFamily);
         model.addProperty("path", weightsPath);
         model.addProperty("task", task);
         model.addProperty("mode", "offline");

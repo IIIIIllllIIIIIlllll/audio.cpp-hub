@@ -305,6 +305,11 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         String executablePath = executableRegistry.resolvePath(executable).toString();
         String executableName = executable.get("name").getAsString();
         String serverTask = modelEntry.has("serverTask") ? modelEntry.get("serverTask").getAsString() : "tts";
+        // 引擎 family 取自注册条目的 family 字段（缺省回退 modelId）：index_tts2 的
+        // v2 / v2.5 两个条目共享 family=index_tts2，variant 由权重 config 区分。
+        String engineFamily = modelEntry.has("family") && !modelEntry.get("family").isJsonNull()
+                ? modelEntry.get("family").getAsString()
+                : modelId;
         // 条目可携带 env 环境变量表，拉起子进程时注入
         Map<String, String> env = new LinkedHashMap<>();
         if (executable.has("env") && executable.get("env").isJsonObject()) {
@@ -315,7 +320,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
             }
         }
         try {
-            ModelInstance instance = instanceManager.start(modelId, resolvedWeights, backend, device, port,
+            ModelInstance instance = instanceManager.start(modelId, engineFamily, resolvedWeights, backend, device, port,
                     threads, executablePath, executableName, serverTask, env, optString(body, "name"));
             sendJson(ctx, HttpResponseStatus.OK, Jsons.GSON.toJson(toJson(instance)), request);
         } catch (Exception e) {
