@@ -1600,26 +1600,21 @@ function buildVibeVoiceScript() {
   return out.join("\n");
 }
 
+/* qwen3_tts 变体由模型条目决定（拆分后三个独立模型：base/customvoice/voicedesign） */
+function qwen3VariantOf(modelId) {
+  if (modelId === "qwen3_tts_customvoice") return "custom_voice";
+  if (modelId === "qwen3_tts_voicedesign") return "voice_design";
+  return "base";
+}
+
 /* ---------- TTS 面板 ---------- */
 function renderTtsPanel(m) {
   $("tts-title").textContent = t("tts.title") + " — " + I18N.pick(m, "displayName");
   ttsLanguageSel = buildLanguageRow($("tts-language-row"), m, "tts");
 
-  // qwen3_tts 变体选择
-  const variantRow = $("tts-variant-row");
-  variantRow.innerHTML = "";
+  // qwen3_tts 变体：模型拆分后由条目决定，不再显示下拉
   if (m.family === "qwen3_tts") {
-    const label = el(`<label>${t("tts.variant")}<select id="tts-variant">
-      <option value="base">${t("tts.variant.base")}</option>
-      <option value="custom_voice">${t("tts.variant.custom_voice")}</option>
-      <option value="voice_design">${t("tts.variant.voice_design")}</option>
-    </select></label>`);
-    variantRow.appendChild(label);
-    label.querySelector("select").onchange = (e) => {
-      ttsVariant = e.target.value;
-      updateTtsBlocks(m);
-    };
-    ttsVariant = "base";
+    ttsVariant = qwen3VariantOf(m.id);
   }
 
   // qwen3_tts CustomVoice 的 speaker 下拉
@@ -2160,15 +2155,9 @@ function fillTtsForm(m, rec) {
 
   const voice = rec.voice || { kind: "default" };
   if (m.family === "qwen3_tts") {
-    // 按声音来源还原变体选择（speaker→CustomVoice，instruct→VoiceDesign，其余→Base）
-    const variantSel = $("tts-variant");
-    const variant = voice.kind === "speaker" ? "custom_voice"
-      : voice.kind === "instruct" ? "voice_design" : "base";
-    if (variantSel) {
-      variantSel.value = variant;
-      ttsVariant = variant;
-      updateTtsBlocks(m);
-    }
+    // 变体由模型条目决定（拆分后三个独立模型），历史声音来源与变体一一对应
+    ttsVariant = qwen3VariantOf(m.id);
+    updateTtsBlocks(m);
     if (voice.kind === "speaker" && voice.speaker) {
       const spk = $("tts-spk-speaker");
       if (spk) spk.value = voice.speaker;
