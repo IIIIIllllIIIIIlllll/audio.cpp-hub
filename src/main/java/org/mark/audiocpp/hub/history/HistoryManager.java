@@ -75,8 +75,14 @@ public class HistoryManager {
         rec.addProperty("text", optString(request, "text"));
         rec.addProperty("language", optString(request, "language"));
         rec.add("voice", normalizeVoice(request));
-        if (request.has("options") && request.get("options").isJsonObject()) {
-            rec.add("options", request.getAsJsonObject("options"));
+        // qwen3_tts_voicedesign 的 seed 在请求顶层，并入 options 供前端「载入」还原
+        JsonObject options = request.has("options") && request.get("options").isJsonObject()
+                ? request.getAsJsonObject("options") : new JsonObject();
+        if (request.has("seed") && request.get("seed").isJsonPrimitive()) {
+            options.add("seed", request.get("seed"));
+        }
+        if (options.size() > 0) {
+            rec.add("options", options);
         }
         if (result != null) {
             rec.add("result", result);

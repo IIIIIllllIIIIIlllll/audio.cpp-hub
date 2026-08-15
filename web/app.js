@@ -1471,11 +1471,13 @@ function collectParams(m, prefix, req) {
     // 放进 options 嵌套对象：服务端 /v1/tasks/run 对 options 全量透传，
     // 顶层字段只认白名单（emotion_*、interval_silence_ms 等会被静默丢弃）
     const opts = req.options || (req.options = {});
-    if (p.type === "boolean") { opts[key] = input.checked; continue; }
+    // qwen3_tts_voicedesign 的 seed 引擎要求放请求顶层（其余模型 seed 走 options 透传）
+    const target = (m.id === "qwen3_tts_voicedesign" && key === "seed") ? req : opts;
+    if (p.type === "boolean") { target[key] = input.checked; continue; }
     const v = String(input.value).trim();
     if (v === "") continue;
     // enum 与 string 一样按字符串透传（如 index_tts2_5 的 lang），数值类型才做转换
-    opts[key] = (p.type === "string" || p.type === "enum") ? v : (p.type === "integer" ? parseInt(v, 10) : parseFloat(v));
+    target[key] = (p.type === "string" || p.type === "enum") ? v : (p.type === "integer" ? parseInt(v, 10) : parseFloat(v));
   }
 }
 
