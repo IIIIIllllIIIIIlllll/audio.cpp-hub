@@ -19,10 +19,11 @@ function submitLabel(id) {
    lang 在 TTS 枚举行渲染、收集时路由进 options（见 collectEnums） */
 const RESERVED_KEYS = new Set([
   "emotionModes", "emotionLabels", "emotion_alpha",
-  "text", "voice_ref", "language", "speaker", "instruct", "reference_text", "task_route", "lang"
+  "text", "voice_ref", "language", "speaker", "instruct", "instruction", "reference_text", "task_route", "lang", "text_chunk_mode"
 ]);
 
 let models = [];
+let breezeMode = "voice_design";
 let instances = [];
 let executables = [];
 let profiles = [];
@@ -1487,9 +1488,10 @@ function collectEnums(m, prefix, req, exclude) {
     if (!p || Array.isArray(p) || p.type !== "enum" || exclude.includes(key)) continue;
     const sel = $(`${prefix}-${key}`);
     if (!sel) continue;
-    // lang 是引擎 request option（服务端顶层白名单无 lang，顶层会被静默丢弃），放进 options 透传；
+    // lang 与 BreezeTTS 的 text_chunk_mode 是引擎 request option（服务端顶层白名单无这些字段），放进 options 透传；
     // 其余 enum（如 supertonic 的 voice_id）维持顶层路径不变
-    const target = key === "lang" ? (req.options || (req.options = {})) : req;
+    const toOptions = key === "lang" || (m.family === "breeze_tts" && key === "text_chunk_mode");
+    const target = toOptions ? (req.options || (req.options = {})) : req;
     target[key] = sel.value;
   }
 }
@@ -1511,6 +1513,25 @@ function buildTextRow(container, m, key, labelText, id) {
     return true;
   }
   return false;
+}
+
+function buildBreezeInstructionRow(container, m) {
+  container.innerHTML = "";
+  if (m.family !== "breeze_tts") return;
+  const p = m.paramSchema && m.paramSchema.instruction;
+  if (!p || Array.isArray(p)) return;
+  const labelText = I18N.pick(p, "label") || "instruction";
+  const placeholder = I18N.pick(p, "placeholder") || "";
+  const label = document.createElement("label");
+  const title = document.createElement("span");
+  const textarea = document.createElement("textarea");
+  title.textContent = labelText;
+  textarea.id = "tts-instruction";
+  textarea.rows = 3;
+  textarea.value = p.default ?? "";
+  textarea.placeholder = placeholder;
+  label.append(title, textarea);
+  container.appendChild(label);
 }
 
 /* ---------- VibeVoice 多说话人块 ---------- */
@@ -1612,7 +1633,26 @@ function qwen3VariantOf(modelId) {
 /* ---------- TTS 面板 ---------- */
 function renderTtsPanel(m) {
   $("tts-title").textContent = t("tts.title") + " — " + I18N.pick(m, "displayName");
+  buildBreezeInstructionRow($("tts-primary-instruction-row"), m);
   ttsLanguageSel = buildLanguageRow($("tts-language-row"), m, "tts");
+  const modeRow = $("tts-mode-row");
+  modeRow.innerHTML = "";
+  if (m.family === "breeze_tts") {
+    const label = el(`<label>${t("tts.modeLabel")}<select id="tts-breeze-mode"></select></label>`);
+    const sel = label.querySelector("select");
+    for (const mode of ["voice_design", "voice_clone"]) {
+      const opt = document.createElement("option");
+      opt.value = mode;
+      opt.textContent = t("tts.mode." + mode);
+      sel.appendChild(opt);
+    }
+    sel.value = breezeMode;
+    sel.onchange = () => {
+      breezeMode = sel.value;
+      updateTtsBlocks(m);
+    };
+    modeRow.appendChild(label);
+  }
 
   // qwen3_tts 变体：模型拆分后由条目决定，不再显示下拉
   if (m.family === "qwen3_tts") {
@@ -1655,6 +1695,7 @@ function updateTtsBlocks(m) {
   const voiceRefMode = m.inputs && m.inputs.voiceRef;
   let showVoice = voiceRefMode && voiceRefMode !== "none";
   if (isQwen) showVoice = ttsVariant === "base";
+  if (m.family === "breeze_tts") showVoice = breezeMode === "voice_clone";
   $("tts-voice-block").classList.toggle("hidden", !showVoice);
   $("tts-speaker-row").classList.toggle("hidden", !(isQwen && ttsVariant === "custom_voice"));
   if (isQwen) {
@@ -1666,6 +1707,9 @@ function updateTtsBlocks(m) {
     if (insInput) {
       insInput.placeholder = ttsVariant === "voice_design" ? t("tts.instructPlaceholderRequired") : t("tts.instructPlaceholderOptional");
     }
+  }
+  if (m.family === "breeze_tts") {
+    $("tts-ref-text-row").classList.toggle("hidden", breezeMode !== "voice_clone");
   }
 }
 
@@ -1700,7 +1744,10 @@ $("tts-submit").onclick = async () => {
       req.instruct = ins.value.trim();
     }
   } else {
-    const voiceRefMode = m.inputs && m.inputs.voiceRef;
+    let voiceRefMode = m.inputs && m.inputs.voiceRef;
+    if (m.family === "breeze_tts") {
+      voiceRefMode = breezeMode === "voice_clone" ? "required" : "none";
+    }
     if (voiceRefMode && voiceRefMode !== "none") {
       const v = voicePicker.getValue();
       if (voiceRefMode === "required" && !v) { msg.textContent = t("tts.errNoVoice"); return; }
@@ -1730,11 +1777,29 @@ $("tts-submit").onclick = async () => {
       }
     }
     const rt = $("tts-reference-text");
-    if (rt && rt.value.trim()) req.reference_text = rt.value.trim();
+    if (rt && rt.value.trim() && (m.family !== "breeze_tts" || breezeMode === "voice_clone")) {
+      req.reference_text = rt.value.trim();
+    }
     // OmniVoice 原生克隆：提供了参考音频就必须给出参考文本（引擎侧硬约束）
     if (m.family === "omnivoice" && req.voice_ref && !req.reference_text) {
       msg.textContent = t("tts.errOmnivoiceRef");
       return;
+    }
+    if (m.family === "breeze_tts" && req.voice_ref && !req.reference_text) {
+      msg.textContent = t("tts.errBreezeRef");
+      return;
+    }
+    if (m.family === "breeze_tts") {
+      const instruction = $("tts-instruction");
+      const value = instruction ? instruction.value.trim() : "";
+      if (breezeMode === "voice_design" && !value) {
+        msg.textContent = t("tts.errBreezeInstruction");
+        return;
+      }
+      if (value) {
+        const opts = req.options || (req.options = {});
+        opts.instruction = value;
+      }
     }
     const ins = $("tts-instruct");
     if (ins && ins.value.trim()) req.instruct = ins.value.trim();
@@ -2156,6 +2221,12 @@ function fillTtsForm(m, rec) {
   }
 
   const voice = rec.voice || { kind: "default" };
+  if (m.family === "breeze_tts") {
+    breezeMode = voice.kind === "voice_ref" ? "voice_clone" : "voice_design";
+    const modeSel = $("tts-breeze-mode");
+    if (modeSel) modeSel.value = breezeMode;
+    updateTtsBlocks(m);
+  }
   if (m.family === "qwen3_tts") {
     // 变体由模型条目决定（拆分后三个独立模型），历史声音来源与变体一一对应
     ttsVariant = qwen3VariantOf(m.id);
@@ -2174,6 +2245,13 @@ function fillTtsForm(m, rec) {
   if (rtInput) rtInput.value = voice.referenceText || "";
   const insInput = $("tts-instruct");
   if (insInput) insInput.value = voice.instruct || "";
+
+  const breezeInstruction = $("tts-instruction");
+  if (breezeInstruction) {
+    const saved = rec.options && rec.options.instruction;
+    const schema = m.paramSchema && m.paramSchema.instruction;
+    breezeInstruction.value = saved !== undefined ? String(saved) : String(schema && schema.default || "");
+  }
 
   applyHistoryOptions(m, rec.options || {});
 

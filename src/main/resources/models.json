@@ -455,6 +455,33 @@
     }
   },
   {
+    "id": "breeze-tts",
+    "family": "breeze_tts",
+    "ggufUrl": "https://huggingface.co/audio-cpp/audio.cpp-gguf/tree/main/Breeze-TTS-2-GGUF",
+    "displayName": "BreezeTTS 2",
+    "displayNameEn": "BreezeTTS 2",
+    "description": "BreezeTTS 2 中英双语语音合成：不提供参考音频时进行声音设计，提供参考音频时进行声音克隆。",
+    "descriptionEn": "BreezeTTS 2 bilingual speech synthesis: design a voice without reference audio, or clone one when reference audio is provided.",
+    "category": "tts",
+    "serverTask": "tts",
+    "modes": ["offline"],
+    "inputs": { "text": "required", "audio": "none", "voiceRef": "optional" },
+    "outputType": "audio",
+    "paramSchema": {
+      "instruction": { "type": "string", "default": "Speak clearly and naturally.", "label": "声音/表达指令 instruction", "labelEn": "Voice and delivery instruction", "placeholder": "描述目标音色与表达方式", "placeholderEn": "Describe the target voice and delivery" },
+      "reference_text": { "type": "string", "default": "", "label": "参考文本 reference_text（克隆时必填）", "labelEn": "Reference transcript (required for cloning)", "placeholder": "可选；选择参考音频后必须填写准确转写", "placeholderEn": "Optional; required when reference audio is selected" },
+      "text_chunk_size": { "type": "integer", "default": 600, "min": 1, "step": 1 },
+      "text_chunk_mode": { "type": "enum", "values": ["default", "tag_aware", "japanese", "endline"], "default": "default" },
+      "max_tokens": { "type": "integer", "default": 1500, "min": 1, "max": 65536, "step": 50 },
+      "guidance_scale": { "type": "number", "default": 1.0, "min": 0.0, "step": 0.1 },
+      "temperature": { "type": "number", "default": 0.9, "min": 0.0, "step": 0.05 },
+      "depth_temperature": { "type": "number", "default": 0.9, "min": 0.0, "step": 0.05 },
+      "top_k": { "type": "integer", "default": 50, "min": 0, "step": 1 },
+      "top_p": { "type": "number", "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01 },
+      "seed": { "type": "integer", "default": 0, "min": 0, "max": 2147483647, "step": 1 }
+    }
+  },
+  {
     "id": "stable_audio",
     "family": "stable_audio",
     "hfUrl": "https://huggingface.co/stabilityai/stable-audio-3-medium",

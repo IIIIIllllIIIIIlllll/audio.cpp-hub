@@ -1199,6 +1199,47 @@
       }
     ]
   },
+  "breeze-tts": {
+    "displayName": "BreezeTTS 2",
+    "category": "tts",
+    "status": "supported",
+    "packages": [
+      {
+        "id": "breeze_tts_2_q8_0",
+        "displayName": "BreezeTTS 2 Q8_0 GGUF",
+        "format": "gguf",
+        "precision": "q8_0",
+        "default": true,
+        "repo": "audio-cpp/audio.cpp-gguf",
+        "revision": "main",
+        "gated": false,
+        "targetDir": "Breeze-TTS-2-GGUF",
+        "files": [
+          {
+            "remote": "Breeze-TTS-2-GGUF/breeze-tts-2-q8_0.gguf",
+            "local": "breeze-tts-2-q8_0.gguf"
+          }
+        ]
+      },
+      {
+        "id": "breeze_tts_2_bf16",
+        "displayName": "BreezeTTS 2 BF16 GGUF",
+        "format": "gguf",
+        "precision": "bf16",
+        "default": false,
+        "repo": "audio-cpp/audio.cpp-gguf",
+        "revision": "main",
+        "gated": false,
+        "targetDir": "Breeze-TTS-2-GGUF",
+        "files": [
+          {
+            "remote": "Breeze-TTS-2-GGUF/breeze-tts-2-bf16.gguf",
+            "local": "breeze-tts-2-bf16.gguf"
+          }
+        ]
+      }
+    ]
+  },
   "omnivoice": {
     "displayName": "OmniVoice",
     "category": "tts",
