@@ -204,7 +204,7 @@
             <option value="hip">hip(rocm)</option>
           </select>
         </label>
-        <label><span data-i18n="launch.device">设备号（可选）</span><input id="launch-device" type="number" min="0" data-i18n-placeholder="launch.devicePlaceholder" placeholder="留空自动"></label>
+        <label><span data-i18n="launch.device">设备（可选）</span><select id="launch-device"><option value="" data-i18n="launch.deviceAuto">自动</option></select></label>
         <label><span data-i18n="launch.port">端口（可选）</span><input id="launch-port" type="number" min="1024" max="65535" data-i18n-placeholder="launch.portPlaceholder" placeholder="留空自动分配"></label>
         <label><span data-i18n="launch.threads">线程数（可选）</span><input id="launch-threads" type="number" min="1" data-i18n-placeholder="launch.threadsPlaceholder" placeholder="留空自动（CPU 核心数）"></label>
       </div>

@@ -30,6 +30,7 @@ import org.mark.audiocpp.hub.download.DownloadTask;
 import org.mark.audiocpp.hub.fs.FileSystemBrowser;
 import org.mark.audiocpp.hub.history.HistoryAudioExtractor;
 import org.mark.audiocpp.hub.history.HistoryManager;
+import org.mark.audiocpp.hub.instance.DeviceLister;
 import org.mark.audiocpp.hub.instance.InstanceManager;
 import org.mark.audiocpp.hub.instance.ModelInstance;
 import org.mark.audiocpp.hub.proxy.SpeechForwarder;
@@ -140,6 +141,11 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
             sendJson(ctx, HttpResponseStatus.OK, Jsons.GSON.toJson(instanceManager.events().list()), request);
         } else if (method.equals(HttpMethod.GET) && path.equals("/api/executables")) {
             sendJson(ctx, HttpResponseStatus.OK, Jsons.GSON.toJson(executableRegistry.list()), request);
+        } else if (method.equals(HttpMethod.GET) && path.startsWith("/api/executables/")
+                && path.endsWith("/devices")) {
+            // 设备探测：GET /api/executables/<id>/devices（运行 --list-devices）
+            handleExecutableDevices(ctx, request,
+                    path.substring("/api/executables/".length(), path.length() - "/devices".length()));
         } else if (method.equals(HttpMethod.POST) && path.equals("/api/executables")) {
             handleExecutableAdd(ctx, request);
         } else if (method.equals(HttpMethod.PUT) && path.startsWith("/api/executables/")) {
@@ -379,6 +385,60 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
     /** 提取请求体中的 env 对象（{变量名: 值}），缺失或非对象返回 null。 */
     private JsonObject optEnv(JsonObject body) {
         return body.has("env") && body.get("env").isJsonObject() ? body.getAsJsonObject("env") : null;
+    }
+
+    /**
+     * 列出可用设备：运行 <可执行文件> --list-devices 并解析输出，返回 {"devices":[...], "raw":...}。
+     * 探测需加载后端动态库，耗时秒级，放独立线程执行避免阻塞 Netty 事件循环
+     * （请求体在事件循环返回后会被释放，先 retain、线程结束 finally release）。
+     */
+    private void handleExecutableDevices(ChannelHandlerContext ctx, FullHttpRequest request, String id) {
+        JsonObject executable;
+        try {
+            executable = executableRegistry.findById(id);
+        } catch (Exception e) {
+            sendJson(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, errorJson(e), request);
+            return;
+        }
+        if (executable == null) {
+            sendJson(ctx, HttpResponseStatus.NOT_FOUND,
+                    Jsons.error("EXEC_NOT_FOUND", Map.of("id", id), "可执行文件不存在: " + id), request);
+            return;
+        }
+        Path executablePath = executableRegistry.resolvePath(executable);
+        if (!Files.isRegularFile(executablePath)) {
+            sendJson(ctx, HttpResponseStatus.BAD_REQUEST,
+                    Jsons.error("FILE_NOT_FOUND", Map.of("path", executablePath.toString()),
+                            "文件不存在: " + executablePath), request);
+            return;
+        }
+        // 条目可携带 env 环境变量表，注入探测子进程（与启动实例一致，CUDA/ROCm 动态库常依赖 PATH）
+        Map<String, String> env = new LinkedHashMap<>();
+        if (executable.has("env") && executable.get("env").isJsonObject()) {
+            for (Map.Entry<String, JsonElement> e : executable.getAsJsonObject("env").entrySet()) {
+                if (e.getValue().isJsonPrimitive()) {
+                    env.put(e.getKey(), e.getValue().getAsString());
+                }
+            }
+        }
+        request.retain();
+        Thread thread = new Thread(() -> {
+            try {
+                sendJson(ctx, HttpResponseStatus.OK,
+                        DeviceLister.listDevices(executablePath, env).toString(), request);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                sendJson(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR,
+                        Jsons.error("DEVICE_LIST_INTERRUPTED", null, "列出设备被中断"), request);
+            } catch (Exception e) {
+                log.error("列出设备失败: {}", executablePath, e);
+                sendJson(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, errorJson(e), request);
+            } finally {
+                request.release();
+            }
+        });
+        thread.setDaemon(true);
+        thread.start();
     }
 
     /**

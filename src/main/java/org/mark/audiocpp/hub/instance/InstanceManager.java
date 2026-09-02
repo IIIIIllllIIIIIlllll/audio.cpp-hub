@@ -308,8 +308,8 @@ public class InstanceManager {
         }
     }
 
-    /** 展开值中的 ${VAR} 占位符（按子进程将继承的环境查值，未定义展开为空串）。 */
-    private static String expandEnvValue(String value, Map<String, String> processEnv) {
+    /** 展开值中的 ${VAR} 占位符（按子进程将继承的环境查值，未定义展开为空串）。包可见：DeviceLister 复用。 */
+    static String expandEnvValue(String value, Map<String, String> processEnv) {
         java.util.regex.Matcher m = ENV_PLACEHOLDER.matcher(value);
         StringBuilder sb = new StringBuilder();
         while (m.find()) {

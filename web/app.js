@@ -414,6 +414,8 @@ function openLaunchModal() {
   $("launch-msg").textContent = "";
   launchModal.classList.remove("hidden");
   loadProfiles();
+  // 打开弹窗即自动探测当前程序的设备（命中缓存则直接渲染）
+  probeDevices($("launch-exec").value);
 }
 function closeLaunchModal() {
   launchModal.classList.add("hidden");
@@ -474,6 +476,8 @@ document.addEventListener("keydown", (e) => {
 });
 
 async function loadExecutables() {
+  // 可执行文件可能已增删改：设备探测缓存整体失效
+  for (const k of Object.keys(deviceCache)) delete deviceCache[k];
   try {
     const res = await fetch("/api/executables");
     executables = await res.json();
@@ -617,6 +621,98 @@ $("launch-exec").addEventListener("mousedown", (e) => {
   }
 });
 
+/* ---------- 设备探测：打开启动弹窗/切换程序时自动 --list-devices，设备改为下拉选择 ---------- */
+
+/* 探测输出中的后端名（ggml 注册名，不区分大小写）→ 启动表单的后端值，ROCm 对应 hip */
+const DEVICE_BACKEND_MAP = { cuda: "cuda", vulkan: "vulkan", metal: "metal", hip: "hip", rocm: "hip", cpu: "cpu" };
+
+/* 每个可执行文件的探测结果缓存（id → devices 数组）；可执行文件增删改时整体清空 */
+const deviceCache = {};
+
+/* 期望选中的设备（{index, backend}）：配置回填时探测可能尚未完成，选项渲染后据此还原 */
+let wantedDevice = null;
+
+/* 探测指定可执行文件的设备并刷新下拉框；成功的结果按 execId 缓存，失败不缓存（下次重试） */
+async function probeDevices(execId) {
+  if (!execId) {
+    renderDeviceOptions([]);
+    return;
+  }
+  if (deviceCache[execId]) {
+    renderDeviceOptions(deviceCache[execId]);
+    return;
+  }
+  renderDeviceOptions(null);
+  try {
+    const res = await fetch("/api/executables/" + execId + "/devices");
+    const text = await res.text();
+    if (!res.ok) throw new Error(I18N.errText(text));
+    const devices = JSON.parse(text).devices || [];
+    deviceCache[execId] = devices;
+    // 探测期间用户可能已切换程序：仅当仍是当前选择时才渲染
+    if ($("launch-exec").value === execId) renderDeviceOptions(devices);
+  } catch (e) {
+    if ($("launch-exec").value === execId) renderDeviceOptions([]);
+    showToast("error", t("launch.deviceDetectFailed") + t("common.colon") + e.message);
+  }
+}
+
+/* 渲染设备下拉框：devices 为 null 表示检测中（禁用并显示提示）。
+   选项 value 取 "后端:序号" 保证唯一，data-index 记录提交用的设备号；标签以 GPU 名称为主。 */
+function renderDeviceOptions(devices) {
+  const sel = $("launch-device");
+  sel.innerHTML = "";
+  const auto = document.createElement("option");
+  auto.value = "";
+  auto.textContent = devices === null ? t("launch.deviceDetecting") : t("launch.deviceAuto");
+  sel.appendChild(auto);
+  sel.disabled = devices === null;
+  for (const dev of devices || []) {
+    const opt = document.createElement("option");
+    opt.value = dev.backend + ":" + dev.index;
+    opt.dataset.index = dev.index;
+    opt.dataset.backend = dev.backend;
+    const name = (dev.name || "").trim();
+    opt.textContent = (name || dev.backend + " " + dev.index) + "（" + dev.backend + ":" + dev.index + "）";
+    sel.appendChild(opt);
+  }
+  applyWantedDevice();
+}
+
+/* 探测结果渲染后还原期望选中的设备（配置回填/上次选择）；找不到保持“自动” */
+function applyWantedDevice() {
+  const sel = $("launch-device");
+  if (!wantedDevice) {
+    sel.value = "";
+    return;
+  }
+  const opt = [...sel.options].find(o => o.value !== ""
+    && parseInt(o.dataset.index, 10) === wantedDevice.index
+    && (!wantedDevice.backend || DEVICE_BACKEND_MAP[(o.dataset.backend || "").toLowerCase()] === wantedDevice.backend));
+  sel.value = opt ? opt.value : "";
+}
+
+/* 选中当前下拉项的设备号（int），“自动”返回 null；启动请求与配置收集共用 */
+function selectedDeviceIndex() {
+  const opt = $("launch-device").selectedOptions[0];
+  return opt && opt.value !== "" ? parseInt(opt.dataset.index, 10) : null;
+}
+
+/* 手动选择设备：记住选择并联动后端下拉框 */
+$("launch-device").onchange = () => {
+  const opt = $("launch-device").selectedOptions[0];
+  wantedDevice = opt && opt.value !== ""
+    ? { index: parseInt(opt.dataset.index, 10), backend: DEVICE_BACKEND_MAP[(opt.dataset.backend || "").toLowerCase()] }
+    : null;
+  if (wantedDevice && wantedDevice.backend) $("launch-backend").value = wantedDevice.backend;
+};
+
+/* 切换可执行文件：重新探测设备（命中缓存则直接渲染） */
+$("launch-exec").onchange = () => {
+  wantedDevice = null;
+  probeDevices($("launch-exec").value);
+};
+
 $("exec-add-btn").onclick = async () => {
   const msg = $("exec-msg");
   msg.textContent = "";
@@ -728,11 +824,15 @@ function fillLaunchForm(p) {
   $("launch-weights").value = p.weightsPath || "";
   $("launch-name").value = p.instanceName || "";
   $("launch-backend").value = p.backend || "cpu";
-  $("launch-device").value = p.device ?? "";
+  wantedDevice = p.device != null ? { index: p.device, backend: p.backend } : null;
+  applyWantedDevice();
   $("launch-port").value = p.port ?? "";
   $("launch-threads").value = p.threads ?? "";
-  if (p.executableId && [...$("launch-exec").options].some(o => o.value === p.executableId)) {
+  if (p.executableId && [...$("launch-exec").options].some(o => o.value === p.executableId)
+      && $("launch-exec").value !== p.executableId) {
+    // 配置指向另一个可执行文件：设备列表随之失效，重新探测（当前选择在探测完成后还原）
     $("launch-exec").value = p.executableId;
+    probeDevices(p.executableId);
   }
 }
 
@@ -755,10 +855,10 @@ function collectProfileFields(name) {
   if (execId) fields.executableId = execId;
   const instanceName = $("launch-name").value.trim();
   if (instanceName) fields.instanceName = instanceName;
-  const device = $("launch-device").value;
+  const device = selectedDeviceIndex();
   const port = $("launch-port").value;
   const threads = $("launch-threads").value;
-  if (device !== "") fields.device = parseInt(device, 10);
+  if (device !== null) fields.device = device;
   if (port !== "") fields.port = parseInt(port, 10);
   if (threads !== "") fields.threads = parseInt(threads, 10);
   return fields;
@@ -846,10 +946,10 @@ $("launch-btn").onclick = async () => {
   if (execId) body.executableId = execId;
   const name = $("launch-name").value.trim();
   if (name) body.name = name;
-  const device = $("launch-device").value;
+  const device = selectedDeviceIndex();
   const port = $("launch-port").value;
   const threads = $("launch-threads").value;
-  if (device !== "") body.device = parseInt(device, 10);
+  if (device !== null) body.device = device;
   if (port !== "") body.port = parseInt(port, 10);
   if (threads !== "") body.threads = parseInt(threads, 10);
   try {
