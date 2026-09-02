@@ -438,6 +438,14 @@ input[type="range"]::-moz-range-thumb {
 .input-btn-row select { flex: 1; margin-top: 0; min-width: 0; }
 .input-btn-row button { flex: none; white-space: nowrap; padding: 7px 12px; font-size: 12.5px; }
 
+/* ---------- 启动弹窗：高级参数（session_options） ---------- */
+#launch-advanced textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12.5px;
+}
+
 details summary {
   cursor: pointer;
   font-size: 13px;

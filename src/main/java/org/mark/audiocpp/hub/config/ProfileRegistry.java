@@ -17,7 +17,7 @@ import java.util.UUID;
 
 /**
  * 实例启动配置（Profile）注册表：持久化到工作目录下 data/profiles.json。
- * 条目：{id, name, modelId, weightsPath, backend, device?, port?, threads?, executableId?, createdAt, updatedAt}；
+ * 条目：{id, name, modelId, weightsPath, backend, device?, port?, threads?, executableId?, sessionOptions?, createdAt, updatedAt}；
  * 可选字段缺省不写入。文件不存在/为空即为空列表。
  */
 public class ProfileRegistry {

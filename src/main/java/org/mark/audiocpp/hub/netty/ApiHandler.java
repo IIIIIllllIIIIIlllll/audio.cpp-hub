@@ -325,9 +325,17 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
                 }
             }
         }
+        // 高级参数：写入 server.json 模型条目的 session_options
+        Map<String, String> sessionOptions;
+        try {
+            sessionOptions = optStringMap(body, "sessionOptions");
+        } catch (UserException e) {
+            sendJson(ctx, HttpResponseStatus.BAD_REQUEST, errorJson(e), request);
+            return;
+        }
         try {
             ModelInstance instance = instanceManager.start(modelId, engineFamily, resolvedWeights, backend, device, port,
-                    threads, executablePath, executableName, serverTask, env, optString(body, "name"));
+                    threads, executablePath, executableName, serverTask, env, optString(body, "name"), sessionOptions);
             sendJson(ctx, HttpResponseStatus.OK, Jsons.GSON.toJson(toJson(instance)), request);
         } catch (Exception e) {
             log.error("启动实例失败", e);
@@ -385,6 +393,27 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
     /** 提取请求体中的 env 对象（{变量名: 值}），缺失或非对象返回 null。 */
     private JsonObject optEnv(JsonObject body) {
         return body.has("env") && body.get("env").isJsonObject() ? body.getAsJsonObject("env") : null;
+    }
+
+    /** 解析请求体中的字符串表字段（如 sessionOptions）：{键: 标量值}，值统一转字符串；
+     *  缺失返回空表，形状非法抛 UserException。 */
+    private Map<String, String> optStringMap(JsonObject body, String key) {
+        if (!body.has(key) || body.get(key).isJsonNull()) {
+            return Map.of();
+        }
+        if (!body.get(key).isJsonObject()) {
+            throw new UserException("OPTIONS_NOT_OBJECT", Map.of("key", key), key + " 必须为 {键: 值} 对象");
+        }
+        Map<String, String> map = new LinkedHashMap<>();
+        for (Map.Entry<String, JsonElement> e : body.getAsJsonObject(key).entrySet()) {
+            String k = e.getKey().trim();
+            if (k.isEmpty() || !e.getValue().isJsonPrimitive()) {
+                throw new UserException("OPTIONS_INVALID", Map.of("key", key),
+                        key + " 的键不能为空、值必须为标量");
+            }
+            map.put(k, e.getValue().getAsString());
+        }
+        return map;
     }
 
     /**
@@ -507,6 +536,21 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
                 }
                 fields.addProperty(key, value);
             }
+        }
+        // 高级参数（引擎 session_options）随配置持久化
+        Map<String, String> sessionOptions;
+        try {
+            sessionOptions = optStringMap(body, "sessionOptions");
+        } catch (UserException e) {
+            sendJson(ctx, HttpResponseStatus.BAD_REQUEST, errorJson(e), request);
+            return;
+        }
+        if (!sessionOptions.isEmpty()) {
+            JsonObject options = new JsonObject();
+            for (Map.Entry<String, String> e : sessionOptions.entrySet()) {
+                options.addProperty(e.getKey(), e.getValue());
+            }
+            fields.add("sessionOptions", options);
         }
         try {
             if (existingId == null) {

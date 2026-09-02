@@ -591,6 +591,21 @@ function envToText(env) {
   return Object.entries(env).map(([k, v]) => k + "=" + v).join("\n");
 }
 
+/* 解析高级参数输入：每行一个 key=value（写入 server.json 模型条目的 session_options），
+   空行忽略；格式错误抛带行号的异常。键不限字符集（引擎键含点号，如 voxcpm2.weight_type）。 */
+function parseSessionOptionsText() {
+  const options = {};
+  const lines = $("launch-adv-options").value.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const eq = line.indexOf("=");
+    if (eq <= 0) throw new Error(t("launch.advInvalid", { line: i + 1 }));
+    options[line.substring(0, eq).trim()] = line.substring(eq + 1).trim();
+  }
+  return options;
+}
+
 function updateLaunchExec() {
   const sel = $("launch-exec");
   sel.innerHTML = "";
@@ -828,6 +843,7 @@ function fillLaunchForm(p) {
   applyWantedDevice();
   $("launch-port").value = p.port ?? "";
   $("launch-threads").value = p.threads ?? "";
+  $("launch-adv-options").value = envToText(p.sessionOptions);
   if (p.executableId && [...$("launch-exec").options].some(o => o.value === p.executableId)
       && $("launch-exec").value !== p.executableId) {
     // 配置指向另一个可执行文件：设备列表随之失效，重新探测（当前选择在探测完成后还原）
@@ -861,6 +877,8 @@ function collectProfileFields(name) {
   if (device !== null) fields.device = device;
   if (port !== "") fields.port = parseInt(port, 10);
   if (threads !== "") fields.threads = parseInt(threads, 10);
+  const sessionOptions = parseSessionOptionsText();
+  if (Object.keys(sessionOptions).length) fields.sessionOptions = sessionOptions;
   return fields;
 }
 
@@ -886,7 +904,14 @@ async function saveProfile(url, method, fields, failKey) {
 $("profile-save-btn").onclick = async () => {
   const name = (window.prompt(t("profile.namePrompt"), "") || "").trim();
   if (!name) return;
-  if (await saveProfile("/api/profiles", "POST", collectProfileFields(name), "profile.saveFailed")) {
+  let fields;
+  try {
+    fields = collectProfileFields(name);
+  } catch (e) {
+    $("launch-msg").textContent = e.message;
+    return;
+  }
+  if (await saveProfile("/api/profiles", "POST", fields, "profile.saveFailed")) {
     await loadProfiles();
     const saved = profiles.find(p => p.modelId === selectedModelId && p.name === name);
     if (saved) {
@@ -952,6 +977,14 @@ $("launch-btn").onclick = async () => {
   if (device !== null) body.device = device;
   if (port !== "") body.port = parseInt(port, 10);
   if (threads !== "") body.threads = parseInt(threads, 10);
+  let sessionOptions;
+  try {
+    sessionOptions = parseSessionOptionsText();
+  } catch (e) {
+    msg.textContent = e.message;
+    return;
+  }
+  if (Object.keys(sessionOptions).length) body.sessionOptions = sessionOptions;
   try {
     const res = await fetch("/api/instances", {
       method: "POST",

@@ -208,6 +208,11 @@
         <label><span data-i18n="launch.port">端口（可选）</span><input id="launch-port" type="number" min="1024" max="65535" data-i18n-placeholder="launch.portPlaceholder" placeholder="留空自动分配"></label>
         <label><span data-i18n="launch.threads">线程数（可选）</span><input id="launch-threads" type="number" min="1" data-i18n-placeholder="launch.threadsPlaceholder" placeholder="留空自动（CPU 核心数）"></label>
       </div>
+      <details id="launch-advanced">
+        <summary data-i18n="launch.advanced">高级参数（session_options）</summary>
+        <textarea id="launch-adv-options" rows="4" spellcheck="false" placeholder="voxcpm2.weight_type=q8_0"></textarea>
+        <div class="hint" data-i18n="launch.advancedHint">每行一个 key=value，写入 server.json 模型条目的 session_options</div>
+      </details>
       <div id="exec-empty-hint" class="hint hidden"><span data-i18n="launch.execEmpty">尚未配置可执行文件</span>
         <button id="exec-goto-btn" class="btn-ghost" data-i18n="launch.execGoto">去配置</button>
       </div>

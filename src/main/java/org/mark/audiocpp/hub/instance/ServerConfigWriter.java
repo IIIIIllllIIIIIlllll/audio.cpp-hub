@@ -8,14 +8,17 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 
-/** 用 gson 生成 audiocpp_server 的 server.json。model id 即实例服务名（/v1/* 路由键）。 */
+/** 用 gson 生成 audiocpp_server 的 server.json。model id 即实例服务名（/v1/* 路由键）。
+ *  sessionOptions 为高级参数（引擎 session_options，字符串表），非空时写入模型条目。 */
 public final class ServerConfigWriter {
 
     private ServerConfigWriter() {}
 
     public static void write(Path path, String host, int port, String backend, Integer device, Integer threads,
-                             String instanceName, String engineFamily, String weightsPath, String task) throws IOException {
+                             String instanceName, String engineFamily, String weightsPath, String task,
+                             Map<String, String> sessionOptions) throws IOException {
         JsonObject model = new JsonObject();
         model.addProperty("id", instanceName);
         // engineFamily 是引擎侧 family（models.json 的 family 字段），与 hub 内部 modelId 解耦：
@@ -25,6 +28,13 @@ public final class ServerConfigWriter {
         model.addProperty("path", weightsPath);
         model.addProperty("task", task);
         model.addProperty("mode", "offline");
+        if (sessionOptions != null && !sessionOptions.isEmpty()) {
+            JsonObject options = new JsonObject();
+            for (Map.Entry<String, String> e : sessionOptions.entrySet()) {
+                options.addProperty(e.getKey(), e.getValue());
+            }
+            model.add("session_options", options);
+        }
 
         JsonArray models = new JsonArray();
         models.add(model);
