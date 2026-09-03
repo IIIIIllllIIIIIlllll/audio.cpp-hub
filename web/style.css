@@ -898,6 +898,22 @@ footer { padding: 4px 24px 18px; }
   padding: 0 4px;
 }
 .modal-close:hover { color: var(--text); filter: none; }
+
+/* 实例详情弹窗：键值对列表 */
+.kv-list { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.kv-row { display: flex; gap: 12px; align-items: baseline; }
+.kv-key { flex: none; width: 150px; color: var(--text-dim); }
+.kv-val { flex: 1; word-break: break-all; user-select: text; }
+.kv-opts { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.kv-opts code {
+  background: var(--bg);
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  word-break: break-all;
+  user-select: text;
+}
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes modal-in {
   from { transform: translateY(14px); opacity: 0; }

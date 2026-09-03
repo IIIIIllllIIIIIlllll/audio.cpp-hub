@@ -2,6 +2,7 @@ package org.mark.audiocpp.hub.instance;
 
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Map;
 
 /** 一个 audiocpp_server 进程实例。只有 STARTING/READY 的实例存在于管理器中。 */
 public class ModelInstance {
@@ -16,6 +17,8 @@ public class ModelInstance {
     private final String backend;
     private final Integer device;
     private final String executableName;
+    private final Integer threads;
+    private final Map<String, String> sessionOptions;
     private final Path serverJsonPath;
     private final Instant createdAt = Instant.now();
 
@@ -24,6 +27,13 @@ public class ModelInstance {
 
     public ModelInstance(String id, String instanceName, String modelId, String weightsPath, int port,
                          String backend, Integer device, String executableName, Path serverJsonPath) {
+        this(id, instanceName, modelId, weightsPath, port, backend, device, executableName, null, null,
+                serverJsonPath);
+    }
+
+    public ModelInstance(String id, String instanceName, String modelId, String weightsPath, int port,
+                         String backend, Integer device, String executableName, Integer threads,
+                         Map<String, String> sessionOptions, Path serverJsonPath) {
         this.id = id;
         this.instanceName = instanceName;
         this.modelId = modelId;
@@ -32,6 +42,8 @@ public class ModelInstance {
         this.backend = backend;
         this.device = device;
         this.executableName = executableName;
+        this.threads = threads;
+        this.sessionOptions = sessionOptions == null ? Map.of() : Map.copyOf(sessionOptions);
         this.serverJsonPath = serverJsonPath;
     }
 
@@ -44,6 +56,10 @@ public class ModelInstance {
     public String getBackend() { return backend; }
     public Integer getDevice() { return device; }
     public String getExecutableName() { return executableName; }
+    /** 启动时的线程数，null 表示自动（CPU 核心数）。 */
+    public Integer getThreads() { return threads; }
+    /** 启动时的 session_options 高级参数（字符串表），无则为空表。 */
+    public Map<String, String> getSessionOptions() { return sessionOptions; }
     public Path getServerJsonPath() { return serverJsonPath; }
     public Instant getCreatedAt() { return createdAt; }
 

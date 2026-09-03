@@ -41,6 +41,7 @@
           <span class="bar-label" data-i18n="instance.barLabel">实例</span>
           <select id="instance-select"></select>
           <span id="instance-pill" class="pill warn" data-i18n="instance.noReady">没有就绪实例</span>
+          <button id="instance-detail" class="btn-ghost" disabled data-i18n="instance.detail">详情</button>
           <button id="instance-stop" class="stop-btn" disabled data-i18n="instance.stopCurrent">停止当前实例</button>
           <button id="launch-open-btn" class="btn" data-i18n="instance.create">启动模型</button>
         </div>
@@ -218,6 +219,17 @@
       </div>
       <button id="launch-btn" class="btn" data-i18n="launch.submit">启动</button>
       <div id="launch-msg" class="msg"></div>
+    </div>
+  </div>
+
+  <!-- 实例详情 modal：展示运行中实例的启动配置 -->
+  <div id="instance-detail-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title" data-i18n="instance.detailTitle">实例详情</span>
+        <button id="instance-detail-close" class="modal-close">×</button>
+      </div>
+      <div id="instance-detail-body" class="kv-list"></div>
     </div>
   </div>
 

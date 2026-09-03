@@ -155,7 +155,7 @@ public class InstanceManager {
             }
 
             ModelInstance instance = new ModelInstance(id, instanceName, modelId, weightsPath, port, backend, device,
-                    executableName, serverJson);
+                    executableName, threads, sessionOptions, serverJson);
             instance.setProcess(process);
             instances.put(id, instance);
             log.info("实例已启动: executable={}, name={}, modelId={}, backend={}, device={}, port={}, pid={}",

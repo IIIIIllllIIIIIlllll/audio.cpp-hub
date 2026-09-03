@@ -1192,6 +1192,8 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         map.put("backend", instance.getBackend());
         map.put("device", instance.getDevice());
         map.put("executableName", instance.getExecutableName());
+        map.put("threads", instance.getThreads());
+        map.put("sessionOptions", instance.getSessionOptions());
         map.put("status", instance.getStatus().name());
         map.put("createdAt", instance.getCreatedAt().toString());
         return map;

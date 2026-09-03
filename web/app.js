@@ -1036,9 +1036,11 @@ function renderInstanceList() {
       html += `<div class="error-text">${inst.errorMessage}</div>`;
     }
     if (inst.status !== "STOPPED") {
-      html += `<div class="card-actions"><button class="stop-btn">${t("instance.stop")}</button></div>`;
+      html += `<div class="card-actions"><button class="btn-ghost detail-btn">${t("instance.detail")}</button><button class="stop-btn">${t("instance.stop")}</button></div>`;
     }
     card.innerHTML = html;
+    const detailBtn = card.querySelector(".detail-btn");
+    if (detailBtn) detailBtn.onclick = () => openInstanceDetail(inst);
     const stopBtn = card.querySelector(".stop-btn");
     if (stopBtn) {
       stopBtn.onclick = async () => {
@@ -1057,7 +1059,7 @@ function updateInstanceBar() {
   for (const inst of ready) {
     const opt = document.createElement("option");
     opt.value = inst.id;
-    opt.textContent = `#${inst.id} ｜ ${inst.backend}${inst.device != null ? ":" + inst.device : ""} ｜ ${t("instance.port")} ${inst.port}`;
+    opt.textContent = `${inst.instanceName || inst.modelId} ｜ ${inst.backend}${inst.device != null ? ":" + inst.device : ""} ｜ ${t("instance.port")} ${inst.port} ｜ #${inst.id}`;
     select.appendChild(opt);
   }
   const has = ready.length > 0;
@@ -1073,6 +1075,12 @@ function updateInstanceBar() {
   // （重建 DOM 会打断行内播放、折叠已展开的播放器）
   select.disabled = !has;
   $("instance-stop").disabled = !has;
+  $("instance-detail").disabled = !has;
+  // 详情弹窗打开时跟随轮询刷新；实例已消失则自动关闭
+  if (detailInstanceId) {
+    const cur = instances.find(i => i.id === detailInstanceId);
+    if (cur) renderInstanceDetail(cur); else closeInstanceDetail();
+  }
 
   const pill = $("instance-pill");
   pill.textContent = has ? t("instance.ready") : t("instance.noReady");
@@ -1096,6 +1104,76 @@ $("instance-stop").onclick = async () => {
   await fetch("/api/instances/" + activeInstanceId, { method: "DELETE" });
   refreshInstances();
 };
+
+/* ---------- 实例详情弹窗 ---------- */
+const instanceDetailModal = $("instance-detail-modal");
+let detailInstanceId = null;
+function openInstanceDetail(inst) {
+  detailInstanceId = inst.id;
+  renderInstanceDetail(inst);
+  instanceDetailModal.classList.remove("hidden");
+}
+function closeInstanceDetail() {
+  detailInstanceId = null;
+  instanceDetailModal.classList.add("hidden");
+}
+function renderInstanceDetail(inst) {
+  const body = $("instance-detail-body");
+  body.innerHTML = "";
+  const model = models.find(m => m.id === inst.modelId);
+  const rows = [
+    [t("instance.field.name"), inst.instanceName || inst.modelId],
+    [t("instance.field.id"), "#" + inst.id],
+    [t("instance.field.model"), model ? `${I18N.pick(model, "displayName")}（${inst.modelId}）` : inst.modelId],
+    [t("instance.field.status"), statusText(inst.status)],
+    [t("instance.field.weights"), inst.weightsPath],
+    [t("instance.field.backend"), inst.backend],
+    [t("instance.field.device"), inst.device != null ? String(inst.device) : t("instance.valueAuto")],
+    [t("instance.field.port"), String(inst.port)],
+    [t("instance.field.threads"), inst.threads != null ? String(inst.threads) : t("instance.valueAuto")],
+    [t("instance.field.executable"), inst.executableName || "-"],
+    [t("instance.field.createdAt"), inst.createdAt ? new Date(inst.createdAt).toLocaleString() : "-"]
+  ];
+  const addRow = (keyText, valueNode) => {
+    const row = document.createElement("div");
+    row.className = "kv-row";
+    const key = document.createElement("span");
+    key.className = "kv-key";
+    key.textContent = keyText;
+    row.appendChild(key);
+    row.appendChild(valueNode);
+    body.appendChild(row);
+  };
+  for (const [k, v] of rows) {
+    const val = document.createElement("span");
+    val.className = "kv-val";
+    val.textContent = v;
+    addRow(k, val);
+  }
+  const opts = inst.sessionOptions || {};
+  const names = Object.keys(opts);
+  if (names.length) {
+    const list = document.createElement("div");
+    list.className = "kv-opts";
+    for (const name of names) {
+      const item = document.createElement("code");
+      item.textContent = `${name}=${opts[name]}`;
+      list.appendChild(item);
+    }
+    addRow(t("instance.field.sessionOptions"), list);
+  } else {
+    const val = document.createElement("span");
+    val.className = "kv-val";
+    val.textContent = t("instance.valueNone");
+    addRow(t("instance.field.sessionOptions"), val);
+  }
+}
+$("instance-detail").onclick = () => {
+  const inst = instances.find(i => i.id === activeInstanceId);
+  if (inst) openInstanceDetail(inst);
+};
+$("instance-detail-close").onclick = closeInstanceDetail;
+instanceDetailModal.onclick = (e) => { if (e.target === instanceDetailModal) closeInstanceDetail(); };
 
 /* ---------- 下载管理（任务列表 + 模型下载弹窗） ---------- */
 let downloads = [];
