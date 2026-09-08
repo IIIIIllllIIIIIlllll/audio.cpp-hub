@@ -218,6 +218,8 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
                 sendJson(ctx, HttpResponseStatus.NOT_FOUND,
                         Jsons.error("VOICE_NOT_FOUND", Map.of("id", vid), "音色不存在: " + vid), request);
             }
+        } else if (method.equals(HttpMethod.PUT) && path.startsWith("/api/voices/")) {
+            handleVoiceUpdate(ctx, request, path.substring("/api/voices/".length()));
         } else if (method.equals(HttpMethod.GET) && path.startsWith("/api/voices/") && path.endsWith("/audio")) {
             String vid = path.substring("/api/voices/".length(), path.length() - "/audio".length());
             handleVoiceAudio(ctx, request, vid);
@@ -893,45 +895,135 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         }
     }
 
-    /** 操作历史路由：路径段 <modelId>[/<taskId>[/audio]]，GET 列表/详情/音频，DELETE 单删/清空。 */
+    /**
+     * 操作历史路由：路径段 <modelId> 之后先匹配字面量 "groups" 走分组路由，再按原 taskId 逻辑：
+     * GET 列表/详情/结果音频/参考音频快照（.../<taskId>/audio/<name>），PUT .../<taskId>/group 设置分组，
+     * DELETE 单删/清空。
+     */
     private void handleHistory(ChannelHandlerContext ctx, FullHttpRequest request, HttpMethod method,
                                String rest) throws Exception {
         String[] parts = rest.split("/");
         String modelId = parts[0];
+        if (parts.length > 1 && "groups".equals(parts[1])) {
+            handleHistoryGroups(ctx, request, method, modelId, parts.length > 2 ? parts[2] : null);
+            return;
+        }
         String taskId = parts.length > 1 ? parts[1] : null;
         boolean audio = parts.length > 2 && "audio".equals(parts[2]);
-        if (method.equals(HttpMethod.GET) && taskId == null) {
-            sendJson(ctx, HttpResponseStatus.OK, historyManager.list(modelId).toString(), request);
-        } else if (method.equals(HttpMethod.GET) && audio) {
-            Path wav = historyManager.audioPath(modelId, taskId);
-            if (wav == null) {
-                sendJson(ctx, HttpResponseStatus.NOT_FOUND,
-                        Jsons.error("HISTORY_NOT_FOUND", null, "历史音频不存在"), request);
-                return;
-            }
-            sendFileChunked(ctx, HttpResponseStatus.OK, "audio/wav", wav, request, false);
-        } else if (method.equals(HttpMethod.GET)) {
-            JsonObject rec = historyManager.get(modelId, taskId);
-            if (rec == null) {
-                sendJson(ctx, HttpResponseStatus.NOT_FOUND,
-                        Jsons.error("HISTORY_NOT_FOUND", null, "历史记录不存在"), request);
-                return;
-            }
-            sendJson(ctx, HttpResponseStatus.OK, rec.toString(), request);
-        } else if (method.equals(HttpMethod.DELETE) && taskId != null) {
-            if (historyManager.delete(modelId, taskId)) {
-                sendJson(ctx, HttpResponseStatus.OK, Jsons.ok(Map.of("taskId", taskId)), request);
+        String audioName = audio && parts.length > 3 ? parts[3] : null;
+        boolean group = parts.length == 3 && "group".equals(parts[2]);
+        try {
+            if (method.equals(HttpMethod.GET) && taskId == null) {
+                sendJson(ctx, HttpResponseStatus.OK, historyManager.list(modelId).toString(), request);
+            } else if (method.equals(HttpMethod.GET) && audioName != null) {
+                Path wav = historyManager.refAudioPath(modelId, taskId, audioName);
+                if (wav == null) {
+                    sendJson(ctx, HttpResponseStatus.NOT_FOUND,
+                            Jsons.error("HISTORY_NOT_FOUND", null, "历史参考音频不存在"), request);
+                    return;
+                }
+                sendFileChunked(ctx, HttpResponseStatus.OK, "audio/wav", wav, request, false);
+            } else if (method.equals(HttpMethod.GET) && audio) {
+                Path wav = historyManager.audioPath(modelId, taskId);
+                if (wav == null) {
+                    sendJson(ctx, HttpResponseStatus.NOT_FOUND,
+                            Jsons.error("HISTORY_NOT_FOUND", null, "历史音频不存在"), request);
+                    return;
+                }
+                sendFileChunked(ctx, HttpResponseStatus.OK, "audio/wav", wav, request, false);
+            } else if (method.equals(HttpMethod.GET)) {
+                JsonObject rec = historyManager.get(modelId, taskId);
+                if (rec == null) {
+                    sendJson(ctx, HttpResponseStatus.NOT_FOUND,
+                            Jsons.error("HISTORY_NOT_FOUND", null, "历史记录不存在"), request);
+                    return;
+                }
+                sendJson(ctx, HttpResponseStatus.OK, rec.toString(), request);
+            } else if (method.equals(HttpMethod.PUT) && taskId != null && group) {
+                JsonObject body = parseBody(ctx, request);
+                if (body == null) {
+                    return;
+                }
+                String groupId = body.has("groupId") && body.get("groupId").isJsonPrimitive()
+                        ? body.get("groupId").getAsString() : null;
+                if (historyManager.setRecordGroup(modelId, taskId, groupId)) {
+                    sendJson(ctx, HttpResponseStatus.OK, Jsons.ok(Map.of("taskId", taskId)), request);
+                } else {
+                    sendJson(ctx, HttpResponseStatus.NOT_FOUND,
+                            Jsons.error("TASK_NOT_FOUND", null, "历史记录不存在"), request);
+                }
+            } else if (method.equals(HttpMethod.DELETE) && taskId != null) {
+                if (historyManager.delete(modelId, taskId)) {
+                    sendJson(ctx, HttpResponseStatus.OK, Jsons.ok(Map.of("taskId", taskId)), request);
+                } else {
+                    sendJson(ctx, HttpResponseStatus.NOT_FOUND,
+                            Jsons.error("HISTORY_NOT_FOUND", null, "历史记录不存在"), request);
+                }
+            } else if (method.equals(HttpMethod.DELETE)) {
+                historyManager.clear(modelId);
+                sendJson(ctx, HttpResponseStatus.OK, Jsons.ok(Map.of("modelId", modelId)), request);
             } else {
                 sendJson(ctx, HttpResponseStatus.NOT_FOUND,
-                        Jsons.error("HISTORY_NOT_FOUND", null, "历史记录不存在"), request);
+                        Jsons.error("UNKNOWN_API", Map.of("path", request.uri()), "unknown api: " + request.uri()),
+                        request);
             }
-        } else if (method.equals(HttpMethod.DELETE)) {
-            historyManager.clear(modelId);
-            sendJson(ctx, HttpResponseStatus.OK, Jsons.ok(Map.of("modelId", modelId)), request);
-        } else {
-            sendJson(ctx, HttpResponseStatus.NOT_FOUND,
-                    Jsons.error("UNKNOWN_API", Map.of("path", request.uri()), "unknown api: " + request.uri()),
-                    request);
+        } catch (UserException e) {
+            sendJson(ctx, HttpResponseStatus.BAD_REQUEST, errorJson(e), request);
+        }
+    }
+
+    /**
+     * 历史分组路由：GET/POST /api/history/<modelId>/groups（列表/新建），
+     * PUT/DELETE /api/history/<modelId>/groups/<gid>（重命名/删除）。
+     */
+    private void handleHistoryGroups(ChannelHandlerContext ctx, FullHttpRequest request, HttpMethod method,
+                                     String modelId, String groupId) {
+        try {
+            if (method.equals(HttpMethod.GET) && groupId == null) {
+                sendJson(ctx, HttpResponseStatus.OK, historyManager.listGroups(modelId).toString(), request);
+            } else if (method.equals(HttpMethod.POST) && groupId == null) {
+                JsonObject body = parseBody(ctx, request);
+                if (body == null) {
+                    return;
+                }
+                JsonObject group = historyManager.createGroup(modelId, optString(body, "name"));
+                sendJson(ctx, HttpResponseStatus.OK, group.toString(), request);
+            } else if (method.equals(HttpMethod.PUT) && groupId != null) {
+                JsonObject body = parseBody(ctx, request);
+                if (body == null) {
+                    return;
+                }
+                if (historyManager.renameGroup(modelId, groupId, optString(body, "name"))) {
+                    sendJson(ctx, HttpResponseStatus.OK, Jsons.ok(Map.of("id", groupId)), request);
+                } else {
+                    sendJson(ctx, HttpResponseStatus.NOT_FOUND,
+                            Jsons.error("GROUP_NOT_FOUND", null, "分组不存在"), request);
+                }
+            } else if (method.equals(HttpMethod.DELETE) && groupId != null) {
+                if (historyManager.deleteGroup(modelId, groupId)) {
+                    sendJson(ctx, HttpResponseStatus.OK, Jsons.ok(Map.of("id", groupId)), request);
+                } else {
+                    sendJson(ctx, HttpResponseStatus.NOT_FOUND,
+                            Jsons.error("GROUP_NOT_FOUND", null, "分组不存在"), request);
+                }
+            } else {
+                sendJson(ctx, HttpResponseStatus.NOT_FOUND,
+                        Jsons.error("UNKNOWN_API", Map.of("path", request.uri()), "unknown api: " + request.uri()),
+                        request);
+            }
+        } catch (UserException e) {
+            sendJson(ctx, HttpResponseStatus.BAD_REQUEST, errorJson(e), request);
+        }
+    }
+
+    /** 解析请求体 JSON 对象；非法时回 400 并返回 null。 */
+    private JsonObject parseBody(ChannelHandlerContext ctx, FullHttpRequest request) {
+        try {
+            return JsonParser.parseString(request.content().toString(CharsetUtil.UTF_8)).getAsJsonObject();
+        } catch (Exception e) {
+            sendJson(ctx, HttpResponseStatus.BAD_REQUEST,
+                    Jsons.error("INVALID_JSON", null, "请求体不是合法 JSON"), request);
+            return null;
         }
     }
 
@@ -1045,7 +1137,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
                 Files.readAllBytes(path), HttpVersion.HTTP_1_1, request);
     }
 
-    /** 保存音色：{"name","uploadId"} 或 {"name","path"}。 */
+    /** 保存音色：{"name","text"?,"uploadId"} 或 {"name","text"?,"path"}。 */
     private void handleVoiceSave(ChannelHandlerContext ctx, FullHttpRequest request) throws Exception {
         JsonObject body;
         try {
@@ -1056,7 +1148,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
             return;
         }
         try {
-            JsonObject entry = voiceLibrary.save(optString(body, "name"),
+            JsonObject entry = voiceLibrary.save(optString(body, "name"), optString(body, "text"),
                     optString(body, "uploadId"), optString(body, "path"));
             sendJson(ctx, HttpResponseStatus.OK, entry.toString(), request);
         } catch (UserException e) {
@@ -1064,6 +1156,29 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
                     Jsons.error(e.getCode(), e.getParams(), e.getMessage()), request);
         } catch (Exception e) {
             sendJson(ctx, HttpResponseStatus.BAD_REQUEST, Jsons.error(e.getMessage()), request);
+        }
+    }
+
+    /** 更新音色名称与文本内容：{"name"?,"text"?}，null 字段不修改。 */
+    private void handleVoiceUpdate(ChannelHandlerContext ctx, FullHttpRequest request, String vid) throws Exception {
+        JsonObject body;
+        try {
+            body = JsonParser.parseString(request.content().toString(CharsetUtil.UTF_8)).getAsJsonObject();
+        } catch (Exception e) {
+            sendJson(ctx, HttpResponseStatus.BAD_REQUEST,
+                    Jsons.error("INVALID_JSON", null, "请求体不是合法 JSON"), request);
+            return;
+        }
+        try {
+            if (voiceLibrary.update(vid, optString(body, "name"), optString(body, "text"))) {
+                sendJson(ctx, HttpResponseStatus.OK, Jsons.ok(Map.of("vid", vid)), request);
+            } else {
+                sendJson(ctx, HttpResponseStatus.NOT_FOUND,
+                        Jsons.error("VOICE_NOT_FOUND", Map.of("id", vid), "音色不存在: " + vid), request);
+            }
+        } catch (UserException e) {
+            sendJson(ctx, HttpResponseStatus.BAD_REQUEST,
+                    Jsons.error(e.getCode(), e.getParams(), e.getMessage()), request);
         }
     }
 

@@ -39,12 +39,14 @@ public class VoiceLibrary {
 
     /**
      * 保存音色：uploadId（上传件 id）与 sourcePath（绝对路径）二选一。
-     * 复制文件为 data/voices/<vid>.wav 并登记。
+     * 复制文件为 data/voices/<vid>.wav 并登记；text 为音频文本内容（可空），名称库内唯一。
      */
-    public synchronized JsonObject save(String name, String uploadId, String sourcePath) throws IOException {
+    public synchronized JsonObject save(String name, String text, String uploadId, String sourcePath) throws IOException {
         if (name == null || name.trim().isEmpty()) {
             throw new UserException("VOICE_NAME_REQUIRED", "音色名称不能为空");
         }
+        JsonArray index = readIndex();
+        checkNameUnique(index, name, null);
         Path source;
         if (uploadId != null && !uploadId.isEmpty()) {
             source = AudioStore.uploadPath(uploadId);
@@ -71,6 +73,9 @@ public class VoiceLibrary {
         JsonObject entry = new JsonObject();
         entry.addProperty("vid", vid);
         entry.addProperty("name", name.trim());
+        if (text != null && !text.isEmpty()) {
+            entry.addProperty("text", text);
+        }
         entry.addProperty("createdAt", Instant.now().toString());
         entry.addProperty("path", target.toAbsolutePath().toString());
         entry.addProperty("durationSec", (Double) info.get("durationSec"));
@@ -79,10 +84,61 @@ public class VoiceLibrary {
         entry.addProperty("bitsPerSample", (Integer) info.get("bitsPerSample"));
         entry.addProperty("sizeBytes", (Long) info.get("sizeBytes"));
 
-        JsonArray index = readIndex();
         index.add(entry);
         writeIndex(index);
         return entry;
+    }
+
+    /**
+     * 更新音色名称与文本内容：name/text 为 null 表示不修改对应字段。
+     * vid 非法或条目不存在返回 false；name 重名（排除自身）抛 UserException。
+     */
+    public synchronized boolean update(String vid, String name, String text) throws IOException {
+        if (vid == null || !SAFE_ID.matcher(vid).matches()) {
+            return false;
+        }
+        if (name != null && name.trim().isEmpty()) {
+            throw new UserException("VOICE_NAME_REQUIRED", "音色名称不能为空");
+        }
+        JsonArray index = readIndex();
+        JsonObject entry = null;
+        for (JsonElement el : index) {
+            JsonObject obj = el.getAsJsonObject();
+            if (vid.equals(obj.get("vid").getAsString())) {
+                entry = obj;
+                break;
+            }
+        }
+        if (entry == null) {
+            return false;
+        }
+        if (name != null) {
+            checkNameUnique(index, name, vid);
+            entry.addProperty("name", name.trim());
+        }
+        if (text != null) {
+            if (text.isEmpty()) {
+                entry.remove("text");
+            } else {
+                entry.addProperty("text", text);
+            }
+        }
+        writeIndex(index);
+        return true;
+    }
+
+    /** 检查名称库内唯一（trim 后比较，大小写敏感；excludeVid 为排除自身的条目 id，可为 null）。 */
+    private void checkNameUnique(JsonArray index, String name, String excludeVid) {
+        String trimmed = name.trim();
+        for (JsonElement el : index) {
+            JsonObject obj = el.getAsJsonObject();
+            if (excludeVid != null && excludeVid.equals(obj.get("vid").getAsString())) {
+                continue;
+            }
+            if (trimmed.equals(obj.get("name").getAsString())) {
+                throw new UserException("VOICE_NAME_EXISTS", "音色名称已存在: " + trimmed);
+            }
+        }
     }
 
     /** 删除音色（文件 + 登记）。 */

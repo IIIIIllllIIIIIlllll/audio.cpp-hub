@@ -16,6 +16,8 @@
       <span class="subtitle" data-i18n="header.subtitle">audiocpp_server 进程管理 &amp; 音频工作台</span>
     </div>
     <div class="header-actions">
+      <button id="voices-btn" class="theme-btn" data-i18n-title="voices.title" title="音色库">🎙</button>
+      <button id="history-btn" class="theme-btn" data-i18n-title="history.title" title="操作历史">🕘</button>
       <button id="downloads-btn" class="theme-btn" data-i18n-title="dl.managerTitle" title="下载管理">⬇️<span id="dl-badge" class="dl-badge hidden">0</span></button>
       <button id="lang-toggle" class="theme-btn" data-i18n-title="header.langTitle" title="切换语言 / Switch language">EN</button>
       <button id="settings-btn" class="theme-btn" data-i18n-title="header.settingsTitle" title="可执行文件设置">⚙️</button>
@@ -26,10 +28,10 @@
   <main>
     <!-- 左栏：模型 + 实例 -->
     <aside id="left">
-      <h2 data-i18n="nav.models">模型</h2>
-      <div id="model-list" class="card-list"></div>
       <h2 data-i18n="nav.instances">实例</h2>
       <div id="instance-list" class="card-list"></div>
+      <h2 data-i18n="nav.models">模型</h2>
+      <div id="model-list" class="card-list"></div>
     </aside>
 
     <!-- 右栏：常驻工作区 -->
@@ -148,29 +150,56 @@
         </div>
       </div>
     </section>
+  </main>
 
-    <!-- 右栏：操作历史侧边栏（按 modelId 记录，仅 TTS 模型显示；窄屏变为抽屉式弹出） -->
-    <aside id="history-sidebar" class="hidden">
+  <!-- 操作历史全屏面板：页头 🕘 按钮弹出（按 modelId 记录，仅 TTS 有落盘历史） -->
+  <div id="history-panel" class="modal-overlay hidden">
+    <div class="history-panel-card">
       <div class="history-header">
         <span class="history-title" data-i18n="history.title">操作历史</span>
         <div class="history-actions">
           <button id="history-privacy" type="button" class="btn-ghost">隐私</button>
+          <button id="history-group-new" type="button" class="btn-ghost" data-i18n="history.groupNew">新建分组</button>
           <button id="history-refresh" type="button" class="btn-ghost" data-i18n="history.refresh">刷新</button>
           <button id="history-clear" type="button" class="stop-btn" data-i18n="history.clear">清空</button>
           <button id="history-close" type="button" class="theme-btn" data-i18n-title="history.closeTitle" title="关闭">×</button>
         </div>
       </div>
       <div id="history-list"></div>
-    </aside>
-  </main>
+    </div>
+  </div>
+
+  <!-- 音色库管理面板：页头 🎙 打开。音色 = 全局资源（名称唯一 + 文本内容 + 音频文件） -->
+  <div id="voices-panel" class="modal-overlay hidden">
+    <div class="history-panel-card">
+      <div class="history-header">
+        <span class="history-title" data-i18n="voices.title">音色库</span>
+        <div class="history-actions">
+          <button id="voices-close" type="button" class="theme-btn" data-i18n-title="history.closeTitle" title="关闭">×</button>
+        </div>
+      </div>
+      <div class="voices-body">
+        <div id="voices-list"></div>
+        <div class="voices-add">
+          <div class="detail-label" data-i18n="voices.addTitle">添加音色</div>
+          <div class="voices-add-fields">
+            <input id="voice-add-name" type="text" data-i18n-placeholder="voices.namePlaceholder" placeholder="名称（必填，不可重复）">
+            <textarea id="voice-add-text" rows="2" data-i18n-placeholder="voices.textPlaceholder" placeholder="音频文本内容（部分模型要求参考音频 + 文本）"></textarea>
+          </div>
+          <div id="voice-add-picker"></div>
+          <div class="voices-add-actions">
+            <button id="voice-add-btn" type="button" class="btn" data-i18n="voices.add">添加</button>
+            <span id="voice-add-msg" class="hint"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <footer class="hint" data-i18n="footer.hint">提示：音频可上传 / 录制 / 从音色库选择，也可填写运行 hub 的机器上的本机路径。</footer>
   <div id="toast-root"></div>
   <!-- 移动端抽屉遮罩：点击收起左侧模型/实例菜单 -->
   <div id="drawer-overlay" class="drawer-overlay hidden"></div>
-  <!-- 窄屏历史抽屉：右下角悬浮按钮 + 遮罩 -->
-  <button id="history-fab" class="theme-btn hidden" data-i18n-title="history.fabTitle" title="操作历史">🕘</button>
-  <div id="history-overlay" class="drawer-overlay hidden"></div>
 
   <!-- 启动模型 modal -->
   <div id="launch-modal" class="modal-overlay hidden">
@@ -398,6 +427,8 @@
   <script src="/wav.js"></script>
   <script src="/file-browser.js"></script>
   <script src="/audio-picker.js"></script>
+  <script src="/voice-select.js"></script>
   <script src="/app.js"></script>
+  <script src="/voices-panel.js"></script>
 </body>
 </html>

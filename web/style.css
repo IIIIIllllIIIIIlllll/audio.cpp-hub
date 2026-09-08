@@ -142,7 +142,7 @@ main {
   padding: 20px 24px;
 }
 #left {
-  flex: 0 0 296px;
+  flex: 0 0 360px;
   min-height: 0;
   overflow-y: auto;
   /* 左/上各留 2px，避免选中卡片的外扩 box-shadow 和 hover 上移被 overflow 裁剪 */
@@ -167,7 +167,7 @@ footer { flex: none; }
     left: 0;
     bottom: 0;
     z-index: 250;
-    width: min(320px, 85vw);
+    width: min(380px, 92vw);
     flex: none;
     padding: 16px 12px;
     overflow-y: auto;
@@ -212,7 +212,7 @@ footer { flex: none; }
 /* 模型列表：紧凑展示（标题 + 家族徽标一行，描述单行省略） */
 #model-list { gap: 6px; }
 #model-list .card { padding: 8px 12px; border-radius: 10px; }
-#model-list .card-title { font-size: 13px; gap: 6px; }
+#model-list .card-title { font-size: 13px; gap: 6px; flex-wrap: wrap; }
 #model-list .card-family { font-size: 11px; margin-top: 1px; }
 #model-list .card-desc {
   font-size: 12px;
@@ -280,6 +280,7 @@ footer { flex: none; }
 .badge {
   display: inline-block;
   padding: 2px 10px;
+  white-space: nowrap;
   border-radius: 999px;
   font-size: 11.5px;
   font-weight: 600;
@@ -593,21 +594,6 @@ details summary:hover { text-decoration: underline; }
 }
 .trim-bar button { padding: 5px 12px; font-size: 12px; }
 
-.save-voice-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-}
-.save-voice-row input { flex: 0 0 180px; margin-top: 0; }
-.save-voice-row button {
-  padding: 6px 12px;
-  font-size: 12px;
-  background: transparent;
-  border-color: var(--ok);
-  color: var(--ok);
-}
-.save-voice-row button:hover { background: var(--ok); color: #fff; }
 
 .picker-msg { font-size: 12.5px; color: var(--accent); margin-top: 6px; word-break: break-all; }
 .picker-msg-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -1120,54 +1106,27 @@ footer { padding: 4px 24px 18px; }
 #tts-variant-row select, #tts-speaker-row select { max-width: 340px; }
 
 /* ---------- TTS 操作历史（右侧边栏） ---------- */
-#history-sidebar {
-  flex: 0 0 320px;
-  /* 必须显式归零：flex item 默认 min-width:auto，长文本（尤其无空格英文/URL）的
-     min-content 宽度会把侧栏撑过 320px，导致宽度随文本不断增长 */
-  min-width: 0;
+#history-panel .history-panel-card,
+#voices-panel .history-panel-card {
+  width: min(1100px, calc(100vw - 48px));
+  height: calc(100vh - 96px);
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--card);
+  background: var(--bg-elevated);
   border: 1px solid var(--card-border);
-  border-radius: 12px;
-  padding: 14px;
+  border-radius: 14px;
+  box-shadow: var(--shadow-hover);
+  padding: 16px 20px;
 }
-#history-close { display: none; }
-/* 窄屏悬浮按钮：桌面端隐藏 */
-#history-fab { display: none; }
 @media (max-width: 1100px) {
-  /* 历史侧边栏变为右侧抽屉，点击 🕘 弹出 */
-  #history-sidebar {
-    position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 250;
-    width: min(360px, 90vw);
-    flex: none;
-    border-radius: 0;
-    border: none;
-    border-left: 1px solid var(--border);
-    background: var(--bg-elevated);
-    box-shadow: var(--shadow-hover);
-    transform: translateX(105%);
-    transition: transform 0.25s ease;
-  }
-  #history-sidebar.open { transform: translateX(0); }
-  #history-close { display: flex; }
-  #history-fab {
-    display: flex;
-    position: fixed;
-    right: 16px;
-    bottom: 16px;
-    z-index: 200;
-    width: 44px;
-    height: 44px;
-    justify-content: center;
-    font-size: 20px;
-    border-radius: 50%;
-    box-shadow: var(--shadow-hover);
+  /* 窄屏下全屏面板进一步收紧边距 */
+  #history-panel .history-panel-card,
+  #voices-panel .history-panel-card {
+    width: calc(100vw - 16px);
+    height: calc(100vh - 24px);
+    border-radius: 10px;
+    padding: 12px;
   }
 }
 .history-header {
@@ -1249,6 +1208,155 @@ footer { padding: 4px 24px 18px; }
 .history-player { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .history-player audio { flex: 1; height: 34px; min-width: 0; }
 .history-player .btn-ghost { flex: none; padding: 4px 12px; font-size: 12px; }
+
+/* 历史分组标题行：组分隔条，可折叠 */
+.history-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  font-size: 12px;
+  color: var(--text-dim);
+  background: var(--input-bg);
+  border-top: 1px solid var(--border);
+  user-select: none;
+}
+.history-group-header .group-toggle {
+  flex: none;
+  padding: 0 4px;
+  font-size: 11px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.history-group-header .group-name {
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-group-header .group-count { flex: none; }
+.history-group-header .group-btns { flex: none; display: flex; gap: 6px; margin-left: auto; }
+.history-group-header .group-btns button { padding: 2px 8px; font-size: 11px; }
+/* 分组模式下历史行缩进，与组标题形成层级 */
+.history-row.grouped { padding-left: 24px; }
+
+/* 历史行「详情」展开面板：四要素分节展示 */
+.history-detail {
+  margin-top: 8px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  user-select: text;
+}
+.history-detail .detail-section + .detail-section { margin-top: 8px; }
+.history-detail .detail-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+.history-detail .detail-text { white-space: pre-wrap; word-break: break-word; max-height: 180px; overflow-y: auto; }
+.history-detail .detail-ref {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.history-detail .detail-ref + .detail-ref { margin-top: 4px; }
+.history-detail .detail-ref .ref-name {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 45%;
+}
+.history-detail .detail-ref audio { flex: 1; height: 30px; min-width: 120px; }
+.history-detail .detail-ref button,
+.history-detail .detail-ref .btn-ghost { flex: none; padding: 2px 8px; font-size: 11px; }
+.history-detail .detail-params { color: var(--text-dim); white-space: pre-wrap; word-break: break-word; }
+
+/* 「移动到分组」弹出菜单：共享元素挂 body，JS 定位（与 #hf-menu 同款） */
+#group-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 140px;
+  max-width: 240px;
+  padding: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  display: none;
+}
+#group-menu.open { display: block; }
+#group-menu button {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  text-align: left;
+  background: transparent;
+  color: var(--text);
+  border-radius: 6px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#group-menu button:hover { background: var(--input-bg); }
+
+/* ---------- 音色下拉选择器（VoiceSelect） ---------- */
+.voice-select-box .vs-title { font-size: 13px; font-weight: 600; color: var(--text-dim); margin-bottom: 4px; }
+.voice-select-box .vs-row { display: flex; gap: 8px; align-items: center; }
+.voice-select-box .vs-select { flex: 1; min-width: 0; }
+.voice-select-box .vs-play,
+.voice-select-box .vs-manage { flex: none; padding: 5px 12px; font-size: 12px; }
+.voice-select-box .vs-audio { display: none; }
+
+/* ---------- 音色库管理面板 ---------- */
+.voices-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 14px; }
+#voices-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+#voices-list .history-empty { padding: 12px 14px; margin: 0; }
+.voice-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  flex-wrap: wrap;
+}
+.voice-row + .voice-row { border-top: 1px solid var(--border); }
+.voice-row .voice-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.voice-row .voice-name { font-weight: 600; font-size: 13.5px; }
+.voice-row .voice-meta { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.voice-row .voice-btns { flex: none; display: flex; gap: 6px; }
+.voice-row .voice-btns button { padding: 3px 10px; font-size: 12px; }
+/* 行内编辑态 */
+.voice-row.editing { flex-direction: column; align-items: stretch; }
+.voice-row.editing .voice-edit-name { width: 100%; }
+.voice-row.editing .voice-edit-text { width: 100%; resize: vertical; }
+.voice-row .voice-edit-btns { display: flex; gap: 8px; align-items: center; }
+/* 添加区 */
+.voices-add {
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  max-height: 45%;
+  overflow-y: auto;
+}
+.voices-add .voices-add-fields { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
+.voices-add .voices-add-actions { display: flex; gap: 10px; align-items: center; margin-top: 10px; }
 
 /* ---------- 下载管理 ---------- */
 /* 模型卡片上的下载按钮：与 HF 按钮同款；有 HF 按钮时它贴最右 */

@@ -1,4 +1,4 @@
-/* 音频选择组件：上传 / 录制 / 音色库 / 本地路径，含波形、播放、裁剪、保存到音色库。
+/* 音频选择组件：上传 / 录制 / 音色库 / 本地路径，含波形、播放、裁剪。
    用法：const picker = new AudioPicker(mountEl, "picker.speakerRef");  // 第二参数为 i18n 字典键
         picker.getValue() → 服务器端音频绝对路径或 null；picker.clear() 清空。
         语言切换时由外部调用 picker.refreshLabels()。 */
@@ -47,7 +47,6 @@ window.AudioPicker = class AudioPicker {
           <select class="voice-select"></select>
           <button type="button" class="voice-load">${t("picker.voiceLoad")}</button>
           <button type="button" class="voice-use hidden">${t("picker.voiceUse")}</button>
-          <button type="button" class="voice-del stop-btn">${t("picker.voiceDelete")}</button>
         </div>
       </div>
       <div class="picker-pane hidden" data-pane="path">
@@ -77,11 +76,6 @@ window.AudioPicker = class AudioPicker {
           <button type="button" class="trim-apply" disabled>${t("picker.trimApply")}</button>
           <button type="button" class="trim-clear" disabled>${t("picker.trimClear")}</button>
           <span class="trim-info hint">${t("picker.trimHint")}</span>
-        </div>
-        <div class="save-voice-row">
-          <input type="text" class="voice-name" placeholder="${t("picker.voiceNamePlaceholder")}">
-          <button type="button" class="voice-save">${t("picker.voiceSave")}</button>
-          <span class="save-msg hint"></span>
         </div>
       </div>
       <div class="picker-msg-row">
@@ -122,7 +116,6 @@ window.AudioPicker = class AudioPicker {
     this.$(".rec-stop").textContent = t("picker.recStop");
     this.$(".voice-load").textContent = t("picker.voiceLoad");
     this.$(".voice-use").textContent = t("picker.voiceUse");
-    this.$(".voice-del").textContent = t("picker.voiceDelete");
     this.$(".path-input").placeholder = t("picker.pathPlaceholder");
     this.$(".path-browse").textContent = t("picker.browse");
     this.$(".path-probe").textContent = t("picker.probe");
@@ -136,8 +129,6 @@ window.AudioPicker = class AudioPicker {
           end: WavUtil.formatDuration(this.selection.end)
         })
       : t("picker.trimHint");
-    this.$(".voice-name").placeholder = t("picker.voiceNamePlaceholder");
-    this.$(".voice-save").textContent = t("picker.voiceSave");
     this.$(".picker-clear").textContent = t("picker.clearCurrent");
     // 音色库下拉当前显示空占位时，按当前语言重建
     const sel = this.$(".voice-select");
@@ -183,7 +174,6 @@ window.AudioPicker = class AudioPicker {
     // 音色库
     this.$(".voice-load").onclick = () => this.previewVoice();
     this.$(".voice-use").onclick = () => this.usePreviewVoice();
-    this.$(".voice-del").onclick = () => this.deleteVoice();
 
     // 本地路径
     this.$(".path-probe").onclick = () => this.probePath();
@@ -239,8 +229,6 @@ window.AudioPicker = class AudioPicker {
       this.drawWave(this.audioEl.currentTime || 0);
     };
 
-    // 保存到音色库
-    this.$(".voice-save").onclick = () => this.saveToLibrary();
 
     // 清除当前音频
     this.$(".picker-clear").onclick = () => this.clear();
@@ -291,7 +279,6 @@ window.AudioPicker = class AudioPicker {
     this.selection = null;
     this.previewVoiceId = null;
     this.$(".picker-common").classList.remove("hidden");
-    this.$(".save-voice-row").classList.remove("hidden");
     this.$(".voice-use").classList.add("hidden");
     this.audioEl.src = "/api/audio/file?id=" + info.id;
     this.$(".time-total").textContent = WavUtil.formatDuration(this.duration);
@@ -303,7 +290,6 @@ window.AudioPicker = class AudioPicker {
       bits: info.bitsPerSample,
       size: WavUtil.formatSize(info.sizeBytes)
     });
-    this.$(".save-msg").textContent = "";
     this.updateTrimUi();
     // 等布局完成后按实际宽度画波形
     requestAnimationFrame(() => this.drawWave(0));
@@ -516,7 +502,6 @@ window.AudioPicker = class AudioPicker {
       this.selection = null;
       this.previewVoiceId = voice.vid;
       this.$(".picker-common").classList.remove("hidden");
-      this.$(".save-voice-row").classList.add("hidden");
       this.$(".voice-use").classList.remove("hidden");
       this.audioEl.src = "/api/voices/" + voice.vid + "/audio";
       this.$(".time-total").textContent = WavUtil.formatDuration(this.duration);
@@ -543,46 +528,7 @@ window.AudioPicker = class AudioPicker {
     this.setMsg(t("picker.currentAudio", { name: voice.name }));
   }
 
-  async deleteVoice() {
-    const voice = this.selectedVoice();
-    if (!voice) { this.toast("info", t("picker.errSelectVoice")); return; }
-    try {
-      const res = await fetch("/api/voices/" + voice.vid, { method: "DELETE" });
-      if (!res.ok) throw new Error(I18N.errText(await res.text()));
-      this.toast("info", t("picker.deleted", { name: voice.name }));
-      if (this.previewVoiceId === voice.vid) {
-        this.$(".picker-common").classList.add("hidden");
-        this.previewVoiceId = null;
-      }
-      this.loadVoices();
-    } catch (e) {
-      this.toast("error", t("picker.deleteFailed", { msg: e.message || e }));
-    }
-  }
 
-  /* ---------- 保存到音色库 ---------- */
-  async saveToLibrary() {
-    const nameEl = this.$(".voice-name");
-    const msgEl = this.$(".save-msg");
-    msgEl.textContent = "";
-    if (!this.uploadId) { msgEl.textContent = t("picker.errNoUpload"); return; }
-    const name = nameEl.value.trim();
-    if (!name) { msgEl.textContent = t("picker.errNoName"); return; }
-    try {
-      const res = await fetch("/api/voices", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, uploadId: this.uploadId })
-      });
-      const text = await res.text();
-      if (!res.ok) throw new Error(I18N.errText(text));
-      msgEl.textContent = t("picker.saved", { name });
-      nameEl.value = "";
-      this.loadVoices();
-    } catch (e) {
-      msgEl.textContent = t("picker.saveFailed", { msg: e.message || e });
-    }
-  }
 
   /* ---------- 本地路径 ---------- */
   /* 通过服务器端文件选择器挑选音频文件，选好后自动探测 */
