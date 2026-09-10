@@ -291,6 +291,19 @@ footer { flex: none; }
 .badge.error { background: var(--err); }
 .badge.stopped { background: #8a8f9c; }
 .badge.unconfigured { background: #8a8f9c; }
+/* 实例有活跃任务（QUEUED/RUNNING）：转圈“工作中”徽标（复用 @keyframes spin）。
+   背景用 --accent、文字与弧线用 --accent-contrast，两套主题下均保持高对比 */
+.badge.working { background: var(--accent); color: var(--accent-contrast); display: inline-flex; align-items: center; gap: 5px; }
+.badge.working::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--accent-contrast);
+  animation: spin 0.8s linear infinite;
+}
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 
 /* 无启动配置的模型：黯淡展示，表示暂不可用 */

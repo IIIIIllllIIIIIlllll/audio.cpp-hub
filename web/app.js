@@ -1035,7 +1035,11 @@ function renderInstanceList() {
     const card = document.createElement("div");
     const statusClass = STATUS_CLASS[inst.status] || "stopped";
     card.className = "card" + (inst.id === activeInstanceId ? " selected" : "");
-    let html = `<div class="card-title">${inst.instanceName || inst.modelId} <span class="badge ${statusClass}">${statusText(inst.status)}</span></div>
+    // 有活跃任务（QUEUED/RUNNING）时追加转圈“工作中”徽标，随 2s 轮询自动出现/消失
+    const workingBadge = (inst.taskCount || 0) > 0
+      ? ` <span class="badge working">${inst.taskCount > 1 ? t("instance.workingCount", { n: inst.taskCount }) : t("instance.working")}</span>`
+      : "";
+    let html = `<div class="card-title">${inst.instanceName || inst.modelId} <span class="badge ${statusClass}">${statusText(inst.status)}</span>${workingBadge}</div>
       <div class="card-family">${modelName} ｜ #${inst.id}</div>
       <div class="card-desc">${inst.backend}${inst.device != null ? ":" + inst.device : ""} ｜ ${t("instance.port")} ${inst.port}${inst.executableName ? " ｜ " + inst.executableName : ""}</div>`;
     if (inst.status === "ERROR" && inst.errorMessage) {
@@ -1433,6 +1437,8 @@ async function submitTask(req) {
   });
   const text = await res.text();
   if (!res.ok) throw new Error(I18N.errText(text));
+  // 入队成功后立即刷新一次实例列表（不 await），卡片“工作中”徽标即时出现，不等 2s 轮询
+  refreshInstances();
   return JSON.parse(text);
 }
 

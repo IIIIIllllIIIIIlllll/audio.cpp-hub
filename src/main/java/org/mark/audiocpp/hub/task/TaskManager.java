@@ -172,6 +172,17 @@ public class TaskManager {
         return array;
     }
 
+    /** 指定实例当前活跃（QUEUED/RUNNING）任务数，供实例列表展示“工作中”状态。 */
+    public synchronized int activeCountFor(String instanceId) {
+        int n = 0;
+        for (HubTask t : tasks.values()) {
+            if (t.active() && t.instanceId.equals(instanceId)) {
+                n++;
+            }
+        }
+        return n;
+    }
+
     /** 单任务详情（含 position），不存在返回 null。 */
     public synchronized JsonObject get(String id) {
         HubTask t = tasks.get(id);

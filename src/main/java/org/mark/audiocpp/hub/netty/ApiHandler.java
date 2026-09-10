@@ -1311,6 +1311,8 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         map.put("sessionOptions", instance.getSessionOptions());
         map.put("status", instance.getStatus().name());
         map.put("createdAt", instance.getCreatedAt().toString());
+        // 当前活跃（QUEUED/RUNNING）任务数，前端据此在实例卡片显示“工作中”徽标
+        map.put("taskCount", taskManager.activeCountFor(instance.getId()));
         return map;
     }
 
