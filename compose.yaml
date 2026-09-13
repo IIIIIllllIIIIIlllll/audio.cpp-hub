@@ -1,0 +1,46 @@
+services:
+  audio-cpp-hub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: audio-cpp-hub:local
+    container_name: audio-cpp-hub
+    restart: unless-stopped
+    init: true
+    ports:
+      - "18080:18080"
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "all"
+      NVIDIA_DRIVER_CAPABILITIES: "compute,utility,graphics"
+      LD_LIBRARY_PATH: "/host-lib:/host-usr-lib:/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu"
+      AUDIOCPP_BACKEND: "vulkan"
+      AUDIOCPP_DEVICE: "0"
+      AUDIOCPP_THREADS: "10"
+      AUDIOCPP_MODEL_ID: "breeze-tts"
+      AUDIOCPP_SERVICE_NAME: "breeze"
+      AUDIOCPP_WEIGHTS: "/audio.cpp/breeze/breeze-tts-2-q8_0.gguf"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [compute, utility, graphics]
+    devices:
+      - /dev/dri:/dev/dri
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./run:/app/run
+      - /home/matthewh/audio.cpp/bin/audiocpp_server:/audio.cpp/bin/audiocpp_server:ro
+      - /home/matthewh/audio.cpp/1.3.296.0:/home/matthewh/audio.cpp/1.3.296.0:ro
+      - /lib/x86_64-linux-gnu:/host-lib:ro
+      - /usr/lib/x86_64-linux-gnu:/host-usr-lib:ro
+      - /home/matthewh/audio.cpp/breeze/breeze-tts-2-q8_0.gguf:/audio.cpp/breeze/breeze-tts-2-q8_0.gguf:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:18080/v1/models"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+    stop_grace_period: 30s

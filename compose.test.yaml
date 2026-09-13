@@ -1,0 +1,22 @@
+services:
+  audio-cpp-hub:
+    extends:
+      file: compose.yaml
+      service: audio-cpp-hub
+    container_name: audio-cpp-hub-compose-test
+    ports:
+      - "28080:18080"
+    volumes:
+      - compose-test-data:/app/data
+      - compose-test-logs:/app/logs
+      - compose-test-run:/app/run
+      - /home/matthewh/audio.cpp/bin/audiocpp_server:/audio.cpp/bin/audiocpp_server:ro
+      - /home/matthewh/audio.cpp/1.3.296.0:/home/matthewh/audio.cpp/1.3.296.0:ro
+      - /lib/x86_64-linux-gnu:/host-lib:ro
+      - /usr/lib/x86_64-linux-gnu:/host-usr-lib:ro
+      - /home/matthewh/audio.cpp/breeze/breeze-tts-2-q8_0.gguf:/audio.cpp/breeze/breeze-tts-2-q8_0.gguf:ro
+
+volumes:
+  compose-test-data:
+  compose-test-logs:
+  compose-test-run:

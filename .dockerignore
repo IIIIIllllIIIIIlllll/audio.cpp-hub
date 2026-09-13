@@ -1,0 +1,13 @@
+.git
+.serena
+.settings
+build
+classes
+target
+run
+data
+logs
+models
+ssl
+*.gguf
+*.wav

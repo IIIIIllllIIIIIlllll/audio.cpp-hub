@@ -1,0 +1,57 @@
+# compose.amd.yaml — AMD GPU (Vulkan via Mesa RADV) deployment.
+# Works on:
+#   - AMD Strix Halo APU (GFX1151)  — AUDIOCPP_DEVICE=1
+#   - AMD RX 6600 XT (Navi23)       — AUDIOCPP_DEVICE=0
+#   - AMD RX 580/590 (Ellesmere)    — AUDIOCPP_DEVICE=0
+#
+# Usage:
+#   docker compose -f compose.amd.yaml up -d --build
+#
+# Required host paths (edit the volumes section below):
+#   AUDIOCPP_SERVER  — audiocpp_server binary path on host
+#   AUDIOCPP_WEIGHTS — model .gguf path on host
+
+services:
+  audio-cpp-hub:
+    build:
+      context: .
+      dockerfile: Dockerfile.amd
+    image: audio-cpp-hub:amd
+    container_name: audio-cpp-hub-amd
+    restart: unless-stopped
+    init: true
+    ports:
+      - "18080:18080"
+    environment:
+      # --- GPU backend ---
+      AUDIOCPP_BACKEND: "vulkan"
+      AUDIOCPP_DEVICE: "${AUDIOCPP_DEVICE:-0}"
+      AUDIOCPP_THREADS: "${AUDIOCPP_THREADS:-4}"
+      # --- Model ---
+      AUDIOCPP_MODEL_ID: "${AUDIOCPP_MODEL_ID:-breeze-tts}"
+      AUDIOCPP_SERVICE_NAME: "${AUDIOCPP_SERVICE_NAME:-breeze}"
+      AUDIOCPP_WEIGHTS: "${AUDIOCPP_WEIGHTS:-/audio.cpp/models/breeze-tts-2-q8_0.gguf}"
+      WARMUP_TEXT: "${WARMUP_TEXT:-This is a warm-up sentence for audio generation.}"
+      # Mesa RADV picks up /dev/dri; no NVIDIA env needed
+      MESA_VK_DEVICE_SELECT_FORCE_DEFAULT_DEVICE: "0"
+    devices:
+      - /dev/dri:/dev/dri
+      - /dev/kfd:/dev/kfd
+    group_add:
+      - video
+      - render
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./run:/app/run
+      # audiocpp_server binary (read-only mount from host)
+      - ${HOST_AUDIOCPP_SERVER:-/audio.cpp/bin/audiocpp_server}:/audio.cpp/bin/audiocpp_server:ro
+      # model weights (read-only mount from host → container path matches AUDIOCPP_WEIGHTS)
+      - ${HOST_AUDIOCPP_WEIGHTS:-/audio.cpp/models/breeze-tts-2-q8_0.gguf}:${AUDIOCPP_WEIGHTS:-/audio.cpp/models/breeze-tts-2-q8_0.gguf}:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:18080/v1/models"]
+      interval: 10s
+      timeout: 5s
+      retries: 24
+      start_period: 30s
+    stop_grace_period: 30s
