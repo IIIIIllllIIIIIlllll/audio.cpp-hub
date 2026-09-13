@@ -561,5 +561,28 @@
       "guidance_scale": { "type": "number", "default": 2.0, "min": 0.0, "max": 20.0, "step": 0.1 },
       "retry_badcase": { "type": "boolean", "default": true }
     }
+  },
+  {
+    "id": "pocket-tts",
+    "family": "pocket_tts",
+    "ggufUrl": "https://huggingface.co/audio-cpp/audio.cpp-gguf/tree/main/PocketTTS-GGUF",
+    "displayName": "Pocket TTS",
+    "displayNameEn": "Pocket TTS",
+    "description": "Pocket TTS 轻量语音合成：参考音频克隆音色，输出 24000Hz 单声道 WAV。",
+    "descriptionEn": "Pocket TTS lightweight speech synthesis: clones voice from reference audio, outputs 24000Hz mono WAV.",
+    "category": "tts",
+    "serverTask": "tts",
+    "modes": ["offline"],
+    "inputs": { "text": "required", "audio": "none", "voiceRef": "required" },
+    "outputType": "audio",
+    "paramSchema": {
+      "text": { "type": "string", "required": true },
+      "voice_ref": { "type": "path", "required": true, "hint": "参考音频 wav 路径", "hintEn": "Reference wav path" },
+      "temperature": { "type": "number", "default": 0.8, "min": 0.0, "step": 0.05 },
+      "top_k": { "type": "integer", "default": 50, "min": 0, "step": 1 },
+      "top_p": { "type": "number", "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01 },
+      "seed": { "type": "integer", "default": 0, "min": 0, "max": 2147483647, "step": 1 }
+    }
   }
 ]
+

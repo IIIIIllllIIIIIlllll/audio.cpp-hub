@@ -84,9 +84,15 @@ done
 
 log "Warming up '$SERVICE_NAME' (READY does not prove model is loaded into VRAM)"
 rm -f "$WARMUP_WAV"
+WARMUP_PAYLOAD="{\"model\":\"$SERVICE_NAME\",\"input\":\"$WARMUP_TEXT\",\"response_format\":\"wav\""
+if [[ -n "${AUDIOCPP_VOICE_REF:-}" ]]; then
+  WARMUP_PAYLOAD="$WARMUP_PAYLOAD,\"voice_ref\":\"$AUDIOCPP_VOICE_REF\""
+fi
+WARMUP_PAYLOAD="$WARMUP_PAYLOAD}"
+
 curl -fsS --max-time 300 -X POST "$HUB_URL/v1/audio/speech" \
   -H 'Content-Type: application/json' \
-  --data-raw "{\"model\":\"$SERVICE_NAME\",\"input\":\"$WARMUP_TEXT\",\"response_format\":\"wav\"}" \
+  --data-raw "$WARMUP_PAYLOAD" \
   -o "$WARMUP_WAV" \
   || fatal "Warm-up request failed"
 

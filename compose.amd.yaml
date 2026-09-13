@@ -22,17 +22,20 @@ services:
     # Note: init:true is intentionally omitted — the sysctl it sets
     # (net.ipv4.ip_unprivileged_port_start) is blocked inside Proxmox LXC containers.
     # start-hub.sh handles SIGTERM correctly via trap.
+    network_mode: "${NETWORK_MODE:-bridge}"
     ports:
       - "18080:18080"
     environment:
-      # --- GPU backend ---
+      # --- GPU backend & environment ---
       AUDIOCPP_BACKEND: "vulkan"
       AUDIOCPP_DEVICE: "${AUDIOCPP_DEVICE:-0}"
       AUDIOCPP_THREADS: "${AUDIOCPP_THREADS:-4}"
+      LD_LIBRARY_PATH: "/audio.cpp/bin:/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu"
       # --- Model ---
       AUDIOCPP_MODEL_ID: "${AUDIOCPP_MODEL_ID:-breeze-tts}"
       AUDIOCPP_SERVICE_NAME: "${AUDIOCPP_SERVICE_NAME:-breeze}"
       AUDIOCPP_WEIGHTS: "${AUDIOCPP_WEIGHTS:-/audio.cpp/models/breeze-tts-2-q8_0.gguf}"
+      AUDIOCPP_VOICE_REF: "${AUDIOCPP_VOICE_REF:-}"
       WARMUP_TEXT: "${WARMUP_TEXT:-This is a warm-up sentence for audio generation.}"
       # Mesa RADV picks up /dev/dri; no NVIDIA env needed
       MESA_VK_DEVICE_SELECT_FORCE_DEFAULT_DEVICE: "0"
@@ -46,10 +49,12 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./run:/app/run
-      # audiocpp_server binary (read-only mount from host)
-      - ${HOST_AUDIOCPP_SERVER:-/audio.cpp/bin/audiocpp_server}:/audio.cpp/bin/audiocpp_server:ro
+      # audiocpp binary directory with server and ggml shared libraries (read-only mount from host)
+      - ${HOST_AUDIOCPP_BIN:-/audio.cpp/bin}:/audio.cpp/bin:ro
       # model weights (read-only mount from host → container path matches AUDIOCPP_WEIGHTS)
       - ${HOST_AUDIOCPP_WEIGHTS:-/audio.cpp/models/breeze-tts-2-q8_0.gguf}:${AUDIOCPP_WEIGHTS:-/audio.cpp/models/breeze-tts-2-q8_0.gguf}:ro
+      # optional voice directory mount
+      - ${HOST_AUDIOCPP_VOICES:-./data/voices}:/audio.cpp/voices:ro
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:18080/v1/models"]
       interval: 10s
