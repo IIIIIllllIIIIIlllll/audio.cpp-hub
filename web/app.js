@@ -80,6 +80,7 @@ function rerenderAll() {
   }
   if (!$("downloads-modal").classList.contains("hidden")) renderDownloadList();
   if (!$("model-dl-modal").classList.contains("hidden") && mdlPackages) renderMdlPackages();
+  if (!$("dash-panel").classList.contains("hidden")) renderDash();
   (window.__audioPickers || []).forEach(p => p.refreshLabels && p.refreshLabels());
   (window.__voiceSelects || []).forEach(v => v.refreshLabels && v.refreshLabels());
   if (window.FileBrowser && FileBrowser.relocalize) FileBrowser.relocalize();
@@ -148,6 +149,9 @@ async function loadModels() {
   updateQuickLaunchTitle();
   restoreWeightsPath();
   renderWorkspace();
+  // loadModels() and refreshInstances() run concurrently; refresh the selector after
+  // selectedModelId is known so a READY instance cannot be hidden by an init race.
+  updateInstanceBar();
 }
 
 /* 已配置 = 任一使用记录（Profile）的权重有效，且当前存在至少一个可用的 audiocpp_server。
@@ -468,6 +472,7 @@ $("exec-browse-btn").onclick = async () => {
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
+    closeDashPanel();
     closeSettingsModal();
     closeLaunchModal();
     closeDownloadsModal();
@@ -676,6 +681,7 @@ async function probeDevices(execId) {
 /* 渲染设备下拉框：devices 为 null 表示检测中（禁用并显示提示）。
    选项 value 取 "后端:序号" 保证唯一，data-index 记录提交用的设备号；标签以 GPU 名称为主。 */
 function renderDeviceOptions(devices) {
+  renderBackendOptions(devices);
   const sel = $("launch-device");
   sel.innerHTML = "";
   const auto = document.createElement("option");
@@ -693,6 +699,36 @@ function renderDeviceOptions(devices) {
     sel.appendChild(opt);
   }
   applyWantedDevice();
+}
+
+/* 后端下拉按当前 executable 的实际 --list-devices 结果标记；
+   例如当前二进制只报告 CPU + Vulkan，因此 CUDA 不可用，不能仅凭 UI 静态选项误选。 */
+const BACKEND_LABELS = {
+  cpu: "cpu",
+  cuda: "cuda",
+  vulkan: "vulkan",
+  metal: "metal",
+  hip: "hip(rocm)"
+};
+function renderBackendOptions(devices) {
+  const sel = $("launch-backend");
+  if (!sel) return;
+  const previous = sel.value;
+  const supported = devices === null ? null : new Set(
+    devices.map(d => String(d.backend || "").toLowerCase() === "rocm" ? "hip" : String(d.backend || "").toLowerCase())
+  );
+  sel.innerHTML = "";
+  for (const [value, label] of Object.entries(BACKEND_LABELS)) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = supported && !supported.has(value) ? label + " (unavailable)" : label;
+    opt.disabled = !!supported && !supported.has(value);
+    sel.appendChild(opt);
+  }
+  const preferred = supported === null || supported.has(previous)
+    ? previous
+    : Object.keys(BACKEND_LABELS).find(value => supported.has(value));
+  if (preferred) sel.value = preferred;
 }
 
 /* 探测结果渲染后还原期望选中的设备（配置回填/上次选择）；找不到保持“自动” */
@@ -1045,15 +1081,38 @@ function renderInstanceList() {
     if (inst.status === "ERROR" && inst.errorMessage) {
       html += `<div class="error-text">${inst.errorMessage}</div>`;
     }
+    // 运行时长 + 排队任务数：纯展示信息，随 2s 轮询刷新
+    const sub = [];
+    if (inst.createdAt) sub.push(t("instance.uptime") + " " + fmtUptime(inst.createdAt));
+    if ((inst.taskCount || 0) > 0) sub.push(t("instance.queuedCount", { n: inst.taskCount }));
+    if (sub.length) html += `<div class="card-subtle">${sub.join(" ｜ ")}</div>`;
     if (inst.status !== "STOPPED") {
       html += `<div class="card-actions"><button class="btn-ghost detail-btn">${t("instance.detail")}</button><button class="stop-btn">${t("instance.stop")}</button></div>`;
     }
     card.innerHTML = html;
+    // Selecting an instance also selects its model.  This avoids showing a Breeze
+    // instance in the sidebar while the model-specific selector says "no ready".
+    card.onclick = () => {
+      if (inst.status !== "READY") return;
+      selectedModelId = inst.modelId;
+      localStorage.setItem("hub-model", selectedModelId);
+      activeInstanceId = inst.id;
+      renderModelList();
+      updateQuickLaunchTitle();
+      restoreWeightsPath();
+      renderWorkspace();
+      updateInstanceBar();
+      closeDrawer();
+    };
     const detailBtn = card.querySelector(".detail-btn");
-    if (detailBtn) detailBtn.onclick = () => openInstanceDetail(inst);
+    if (detailBtn) detailBtn.onclick = (e) => {
+      e.stopPropagation();
+      openInstanceDetail(inst);
+    };
     const stopBtn = card.querySelector(".stop-btn");
     if (stopBtn) {
-      stopBtn.onclick = async () => {
+      stopBtn.onclick = async (e) => {
+        e.stopPropagation();
         await fetch("/api/instances/" + inst.id, { method: "DELETE" });
         refreshInstances();
       };
@@ -1384,8 +1443,19 @@ $("mdl-start").onclick = async () => {
 };
 
 /* ---------- 事件通知（toast） ---------- */
+/* 事件文案：后端事件带结构化 kind/args 时按界面语言翻译（evt.* 词条），否则回退原文 */
+function evtText(ev) {
+  if (!ev.kind) return ev.message || "";
+  const translated = t(ev.kind);
+  if (translated === ev.kind) return ev.message || ""; // 未识别的类型回退原文
+  const args = ev.args || {};
+  return translated.replace(/\{(\w+)\}/g, (m, name) =>
+    args[name] !== undefined ? String(args[name]) : m);
+}
+
 let eventsInitialized = false;
 const seenEvents = new Set();
+let lastEvents = [];
 
 async function refreshEvents() {
   let events;
@@ -1395,6 +1465,8 @@ async function refreshEvents() {
   } catch (e) {
     return;
   }
+  lastEvents = events;
+  renderDashEvents();
   const fresh = [];
   for (const ev of events) {
     const key = ev.time + "|" + ev.message;
@@ -1407,7 +1479,7 @@ async function refreshEvents() {
     eventsInitialized = true;
     return;
   }
-  fresh.reverse().forEach(ev => showToast(ev.level, ev.message));
+  fresh.reverse().forEach(ev => showToast(ev.level, evtText(ev)));
 }
 
 function showToast(level, message) {
@@ -1418,6 +1490,357 @@ function showToast(level, message) {
   node.querySelector(".toast-close").onclick = () => node.remove();
   root.appendChild(node);
   setTimeout(() => node.remove(), 8000);
+}
+
+/* ---------- 运行状态面板：页头 📊 打开，聚合 hub/GPU/实例/队列/下载/事件 ----------
+   数据全部来自已有 2s 轮询缓存（instances/downloads/任务列表）+ 新增 GET /api/system/stats；
+   打开时立即渲染，轮询周期内自动更新（面板可见时才拉 stats 与全量任务）。 */
+let dashTasks = [];
+let dashTasksKey = null;
+
+function openDashPanel() {
+  $("dash-panel").classList.remove("hidden");
+  renderDash();
+  refreshDash();
+}
+function closeDashPanel() {
+  $("dash-panel").classList.add("hidden");
+}
+$("dash-btn").onclick = openDashPanel;
+$("dash-close").onclick = closeDashPanel;
+$("dash-panel").addEventListener("mousedown", (e) => {
+  if (e.target === e.currentTarget) closeDashPanel();
+});
+
+/* 面板可见时的增强轮询：系统状态（GPU/hub）+ 全量任务列表（含已完成，供队列卡统计） */
+async function refreshDash() {
+  if ($("dash-panel").classList.contains("hidden")) return;
+  try {
+    const res = await fetch("/api/system/stats");
+    if (res.ok) {
+      const st = await res.json();
+      recordGpuHistory(st);
+      renderDashStats(st);
+    }
+  } catch (e) { /* 下一轮再试 */ }
+  try {
+    const key = instances.map(i => i.id).join(",");
+    if (key !== dashTasksKey) {
+      dashTasks = [];
+      dashTasksKey = key;
+      dashQueueSelection.clear();
+    }
+    const res = await fetch("/api/tasks");
+    if (res.ok) {
+      dashTasks = await res.json();
+      renderDashQueues();
+    }
+  } catch (e) { /* 下一轮再试 */ }
+  renderDashInstances();
+  renderDashDownloads();
+  if (!$("dash-panel").classList.contains("hidden")) {
+    dashText("dash-refreshed", t("dash.refreshedAt") + " " + new Date().toLocaleTimeString());
+  }
+}
+
+let lastDashStats = null;
+
+function dashText(id, text) {
+  const node = $(id);
+  if (node && node.textContent !== text) node.textContent = text; // 避免无谓的重排
+}
+
+/* GPU 指标历史（仅面板可见时随轮询累积）：gpuIndex → [{u, m}]，u=利用率%，m=显存 MiB，-1=缺样 */
+const DASH_HIST_MAX = 40;
+const dashGpuHist = new Map();
+function recordGpuHistory(stats) {
+  for (const g of (stats.gpu && stats.gpu.gpus) || []) {
+    const arr = dashGpuHist.get(g.index) || [];
+    arr.push({ u: g.utilPct != null ? g.utilPct : -1, m: g.memUsedMib != null ? g.memUsedMib : -1 });
+    if (arr.length > DASH_HIST_MAX) arr.splice(0, arr.length - DASH_HIST_MAX);
+    dashGpuHist.set(g.index, arr);
+  }
+}
+
+function dashRow(label, value, cls) {
+  const row = el(`<div class="dash-row"></div>`);
+  const l = el(`<span class="dash-row-label"></span>`);
+  l.textContent = label;
+  const v = el(`<span class="dash-row-value"></span>`);
+  if (cls) v.className += " " + cls;
+  v.textContent = value;
+  row.appendChild(l); row.appendChild(v);
+  return row;
+}
+
+function dashEmpty(text) {
+  const node = el(`<div class="hint"></div>`);
+  node.textContent = text || "";
+  return node;
+}
+
+/* 迷你走势图（canvas，随容器宽度自适应；maxY 固定刻度避免上下跳动） */
+function dashSpark(label, values, maxY, cls, unit) {
+  const wrap = el(`<div class="dash-spark ${cls || ""}"></div>`);
+  const head = el(`<div class="dash-spark-head"></div>`);
+  head.textContent = label;
+  const canvas = document.createElement("canvas");
+  canvas.className = "dash-spark-canvas";
+  wrap.appendChild(head);
+  wrap.appendChild(canvas);
+  requestAnimationFrame(() => drawSpark(canvas, values, maxY, unit)); // 等布局完成再取实际宽度
+  return wrap;
+}
+
+function drawSpark(canvas, values, maxY, unit) {
+  const w = canvas.clientWidth || 200, h = canvas.clientHeight || 34;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+  const pts = values.filter(v => v >= 0);
+  if (pts.length < 2) return;
+  const color = (getComputedStyle(canvas).getPropertyValue("--accent-2") || "#888").trim() || "#888";
+  const max = Math.max(maxY || 0, ...pts, 1);
+  const step = w / (values.length - 1);
+  const path = new Path2D();
+  let started = false;
+  let peakX = 0, peakY = 0, peakV = -1;
+  values.forEach((v, i) => {
+    if (v < 0) { started = false; return; } // 缺样处断线
+    const x = i * step, y = h - 2 - (v / max) * (h - 4);
+    if (!started) { path.moveTo(x, y); started = true; } else path.lineTo(x, y);
+    if (v > peakV) { peakV = v; peakX = x; peakY = y; } // 记录峰值位置
+  });
+  const area = new Path2D(path);
+  area.lineTo(w, h);
+  area.lineTo(0, h);
+  area.closePath();
+  ctx.globalAlpha = 0.12;
+  ctx.fillStyle = color;
+  ctx.fill(area);
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.stroke(path);
+  // 峰值标记：空心圆点，悬停可见具体数值
+  if (peakV >= 0) {
+    ctx.beginPath();
+    ctx.arc(peakX, peakY, 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    canvas.title = "peak " + peakV + (unit ? " " + unit : "");
+  }
+}
+
+/* 打开即整卡渲染（GPU/hub 卡要等首个 stats 响应，其余卡用轮询缓存立即出数据） */
+function renderDash() {
+  renderDashStats(lastDashStats);
+  renderDashInstances();
+  renderDashQueues();
+  renderDashDownloads();
+  renderDashEvents();
+}
+
+function renderDashStats(stats) {
+  if (stats) lastDashStats = stats;
+  if ($("dash-panel").classList.contains("hidden")) return;
+  if (!stats) return;
+  // Hub 卡：运行时长 / 版本 / JVM 内存
+  const hub = stats.hub || {};
+  const heapPct = hub.heapMaxBytes ? Math.round((hub.heapUsedBytes || 0) / hub.heapMaxBytes * 100) : null;
+  const hubBody = $("dash-hub-body");
+  hubBody.innerHTML = "";
+  hubBody.appendChild(dashRow(t("dash.uptime"), fmtUptime(hub.startedAt)));
+  if (hub.version && hub.version !== "{version}") {
+    hubBody.appendChild(dashRow(t("dash.version"), hub.version));
+  }
+  hubBody.appendChild(dashRow(t("dash.heap"),
+    `${fmtBytes(hub.heapUsedBytes)} / ${fmtBytes(hub.heapMaxBytes)}${heapPct != null ? " (" + heapPct + "%)" : ""}`));
+  // GPU 卡：每卡一行指标条；nvidia-smi 不可用时显示原因（容器里常见）
+  const gpuBody = $("dash-gpu-body");
+  gpuBody.innerHTML = "";
+  const gpus = (stats.gpu && stats.gpu.gpus) || [];
+  if (!gpus.length) {
+    const hint = el(`<div class="hint"></div>`);
+    hint.textContent = t("dash.gpuUnavailable") + ((stats.gpu && stats.gpu.unavailableReason) ? ": " + stats.gpu.unavailableReason : "");
+    gpuBody.appendChild(hint);
+  }
+  for (const g of gpus) {
+    const block = el(`<div class="dash-gpu"></div>`);
+    const head = el(`<div class="dash-gpu-head"></div>`);
+    const name = el(`<span class="dash-gpu-name"></span>`);
+    name.textContent = `${g.name || ("GPU " + g.index)}${g.memTotalMib != null ? " · " + g.memTotalMib + " MiB" : ""}`;
+    head.appendChild(name);
+    if (g.tempC != null) {
+      const temp = el(`<span class="dash-gpu-temp"></span>`);
+      temp.textContent = g.tempC + "°C";
+      if (g.tempC >= 80) temp.className += " hot";
+      head.appendChild(temp);
+    }
+    block.appendChild(head);
+    if (g.utilPct != null) {
+      const meter = el(`<div class="dash-meter"><div class="dash-meter-fill"></div><div class="dash-meter-label"></div></div>`);
+      meter.querySelector(".dash-meter-fill").style.width = Math.min(100, g.utilPct) + "%";
+      meter.querySelector(".dash-meter-label").textContent = t("dash.util") + " " + g.utilPct + "%";
+      block.appendChild(meter);
+    }
+    if (g.memUsedMib != null && g.memTotalMib) {
+      const pct = Math.round(g.memUsedMib / g.memTotalMib * 100);
+      const meter = el(`<div class="dash-meter"><div class="dash-meter-fill"></div><div class="dash-meter-label"></div></div>`);
+      meter.querySelector(".dash-meter-fill").style.width = Math.min(100, pct) + "%";
+      meter.querySelector(".dash-meter-label").textContent = t("dash.vram") + ` ${g.memUsedMib} / ${g.memTotalMib} MiB (${pct}%)`;
+      block.appendChild(meter);
+    }
+    // 迷你走势图：利用率固定 0-100 刻度，显存以总容量为满刻度
+    const hist = dashGpuHist.get(g.index) || [];
+    if (hist.length >= 2) {
+      block.appendChild(dashSpark(t("dash.util"), hist.map(p => p.u), 100, "dash-spark-util", "%"));
+      block.appendChild(dashSpark(t("dash.vram"), hist.map(p => p.m), g.memTotalMib, "dash-spark-vram", "MiB"));
+    }
+    gpuBody.appendChild(block);
+  }
+}
+
+function renderDashInstances() {
+  if ($("dash-panel").classList.contains("hidden")) return;
+  const body = $("dash-instances-body");
+  body.innerHTML = "";
+  if (!instances.length) {
+    body.appendChild(dashEmpty(t("instance.empty")));
+    return;
+  }
+  const order = { READY: 0, STARTING: 1 };
+  for (const inst of [...instances].sort((a, b) => (order[a.status] ?? 2) - (order[b.status] ?? 2))) {
+    const row = el(`<div class="dash-row dash-row-click"></div>`);
+    const l = el(`<span class="dash-row-label"></span>`);
+    l.textContent = `${inst.instanceName || inst.modelId} · ${inst.backend}${inst.device != null ? ":" + inst.device : ""}`;
+    const v = el(`<span class="dash-row-value"></span>`);
+    // 运行时长已在左侧实例卡片展示，这里不重复；仅在非零时提示活跃任务数
+    const bits = [statusText(inst.status)];
+    if ((inst.taskCount || 0) > 0) bits.push(t("dash.tasksActive", { n: inst.taskCount }));
+    v.textContent = bits.join(" · ");
+    v.className = "dash-row-value " + (inst.status === "READY" ? "ok" : inst.status === "STARTING" ? "warn" : "err");
+    row.appendChild(l); row.appendChild(v);
+    row.classList.toggle("dash-row-selected", dashQueueSelection.has(inst.id));
+    row.title = t("dash.viewQueue");
+    row.onclick = () => {
+      if (dashQueueSelection.has(inst.id)) dashQueueSelection.delete(inst.id);
+      else { dashQueueSelection.clear(); dashQueueSelection.add(inst.id); }
+      renderDashInstances(); renderDashQueues();
+    };
+    body.appendChild(row);
+  }
+}
+
+/* 队列卡按实例分组：默认只显示有活跃任务的实例（空实例无信息量）；点实例行可强制看某个实例 */
+const dashQueueSelection = new Set();
+function renderDashQueues() {
+  if ($("dash-panel").classList.contains("hidden")) return;
+  const body = $("dash-queues-body");
+  body.innerHTML = "";
+  const activeTasks = dashTasks.filter(x => x.status === "QUEUED" || x.status === "RUNNING");
+  const instanceIds = new Set(dashQueueSelection);
+  for (const task of activeTasks) instanceIds.add(task.instanceId);
+  if (!instanceIds.size) {
+    body.appendChild(dashEmpty(t("dash.noActive")));
+    return;
+  }
+  for (const iid of instanceIds) {
+    const inst = instances.find(i => i.id === iid);
+    const isActive = x => x.status === "QUEUED" || x.status === "RUNNING";
+    const instTasks = dashTasks.filter(x => x.instanceId === iid)
+      .sort((a, b) => (a.status === "RUNNING" ? -1 : a.status === "QUEUED" ? 0 : 1) - (b.status === "RUNNING" ? -1 : b.status === "QUEUED" ? 0 : 1) || String(a.createdAt).localeCompare(String(b.createdAt)))
+      .slice(0, 20);
+    const group = el(`<div class="dash-queue-group"></div>`);
+    const head = el(`<div class="dash-queue-head"></div>`);
+    const name = el(`<span></span>`);
+    name.textContent = t("dash.queueOf", { name: inst ? (inst.instanceName || inst.modelId) : "#" + iid });
+    head.appendChild(name);
+    const more = el(`<span class="hint"></span>`);
+    const recent = dashTasks.filter(x => x.instanceId === iid && !isActive(x)).length;
+    more.textContent = recent ? t("dash.recentDone", { n: recent }) : "";
+    head.appendChild(more);
+    group.appendChild(head);
+    for (const task of instTasks) {
+      const row = el(`<div class="dash-task-row"></div>`);
+      const statusCls = task.status === "RUNNING" ? "warn" : task.status === "QUEUED" ? "dim" : task.status === "DONE" ? "ok" : "err";
+      const status = task.status === "QUEUED"
+        ? t("task.queued") + (task.position > 0 ? t("task.queuedPos", { n: task.position }) : "")
+        : task.status === "RUNNING" ? t("task.running")
+        : task.status === "DONE" ? t("task.done")
+        : task.status === "CANCELLED" ? t("task.cancelled") : t("task.failed");
+      const left = el(`<span class="dash-task-left"></span>`);
+      left.textContent = task.text || t("history.noText");
+      left.title = left.textContent;
+      const right = el(`<span class="dash-task-right ${statusCls}"></span>`);
+      right.textContent = `${status} · ${taskElapsed(task)}`;
+      row.appendChild(left); row.appendChild(right);
+      group.appendChild(row);
+    }
+    body.appendChild(group);
+  }
+}
+
+function renderDashDownloads() {
+  if ($("dash-panel").classList.contains("hidden")) return;
+  const body = $("dash-downloads-body");
+  body.innerHTML = "";
+  if (!downloads.length) {
+    body.appendChild(dashEmpty(t("dl.empty")));
+    return;
+  }
+  const shown = [...downloads].sort((a, b) => (b.status === "RUNNING" || b.status === "PENDING" ? 1 : 0) - (a.status === "RUNNING" || a.status === "PENDING" ? 1 : 0)).slice(0, 8);
+  for (const d of shown) {
+    const model = d.modelId ? models.find(m => m.id === d.modelId) : null;
+    const title = model ? I18N.pick(model, "displayName") : d.targetDir;
+    const block = el(`<div class="dash-dl"></div>`);
+    const head = el(`<div class="dash-dl-head"></div>`);
+    const name = el(`<span class="dash-dl-name"></span>`);
+    name.textContent = title;
+    const st = el(`<span class="hint"></span>`);
+    st.textContent = t("dl.status." + d.status) + (d.status === "RUNNING" && d.speedBps > 0 ? ` · ${fmtBytes(d.speedBps)}/s` : "");
+    head.appendChild(name); head.appendChild(st);
+    block.appendChild(head);
+    const meter = el(`<div class="dash-meter"><div class="dash-meter-fill"></div><div class="dash-meter-label"></div></div>`);
+    const pct = d.percent;
+    meter.querySelector(".dash-meter-fill").style.width = (pct >= 0 ? Math.min(100, pct) : 100) + "%";
+    meter.querySelector(".dash-meter-fill").classList.toggle("indeterminate", pct < 0);
+    meter.querySelector(".dash-meter-label").textContent = `${fmtBytes(d.downloadedBytes)} / ${fmtBytes(d.totalBytes)}${pct >= 0 ? " (" + pct + "%)" : ""}`;
+    block.appendChild(meter);
+    body.appendChild(block);
+  }
+  const rest = downloads.length - shown.length;
+  if (rest > 0) {
+    const hint = el(`<div class="hint"></div>`);
+    hint.textContent = t("dash.moreDownloads", { n: rest });
+    body.appendChild(hint);
+  }
+}
+
+function renderDashEvents() {
+  if ($("dash-panel").classList.contains("hidden")) return;
+  const body = $("dash-events-body");
+  body.innerHTML = "";
+  const events = lastEvents || [];
+  if (!events.length) {
+    body.appendChild(dashEmpty(t("dash.noEvents")));
+    return;
+  }
+  for (const ev of events.slice(0, 50)) {
+    const row = el(`<div class="dash-event ${ev.level === "error" ? "err" : ""}"></div>`);
+    const time = el(`<span class="dash-event-time"></span>`);
+    time.textContent = ev.time ? new Date(ev.time).toLocaleTimeString() : "";
+    const msg = el(`<span class="dash-event-msg"></span>`);
+    const text = evtText(ev);
+    msg.textContent = text;
+    // 被翻译过的事件悬停可看原始中文文案（调试/对照用）
+    if (ev.kind && text !== ev.message) msg.title = ev.message;
+    row.appendChild(time); row.appendChild(msg);
+    body.appendChild(row);
+  }
 }
 
 /* ---------- 异步任务（提交 → 排队 → 轮询） ----------
@@ -1457,6 +1880,20 @@ async function fetchTask(taskId) {
 function taskElapsed(task) {
   const end = task.finishedAt || Date.now();
   return ((end - (task.startedAt || task.createdAt)) / 1000).toFixed(1) + "s";
+}
+
+/* 运行时长："2h 13m" / "45s" 形式（毫秒或 ISO 时间串） */
+function fmtUptime(fromMsOrIso) {
+  const from = typeof fromMsOrIso === "number" ? fromMsOrIso : Date.parse(fromMsOrIso);
+  if (!isFinite(from)) return "-";
+  let s = Math.max(0, Math.floor((Date.now() - from) / 1000));
+  const d = Math.floor(s / 86400); s -= d * 86400;
+  const h = Math.floor(s / 3600); s -= h * 3600;
+  const m = Math.floor(s / 60); s -= m * 60;
+  if (d) return d + "d " + h + "h";
+  if (h) return h + "h " + m + "m";
+  if (m) return m + "m " + s + "s";
+  return s + "s";
 }
 
 /* 取消任务：服务端置 CANCELLED，由轮询观察到终态后统一收尾（toast/侧栏刷新） */
@@ -3102,4 +3539,6 @@ setInterval(() => {
   refreshInstances();
   refreshEvents();
   refreshDownloads();
+  // 运行状态面板打开时追加拉取系统状态与全量任务，并重渲染各卡片
+  refreshDash();
 }, 2000);

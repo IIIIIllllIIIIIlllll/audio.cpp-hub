@@ -153,8 +153,13 @@ public class TaskManager {
 
     // ------------------------------------------------------------------ 查询
 
-    /** 列表：活跃在前（其余按创建时间倒序）；activeOnly 只留 QUEUED/RUNNING，modelId 非空时过滤。 */
+    /** 列表：活跃在前（其余按创建时间倒序）；activeOnly 只留 QUEUED/RUNNING，modelId/instanceId 非空时过滤。 */
     public synchronized JsonArray list(boolean activeOnly, String modelId) {
+        return list(activeOnly, modelId, null);
+    }
+
+    /** 同上，另支持按实例过滤（仪表盘按实例查看队列用）。 */
+    public synchronized JsonArray list(boolean activeOnly, String modelId, String instanceId) {
         List<HubTask> all = new ArrayList<>(tasks.values());
         all.sort(Comparator.comparingLong((HubTask t) -> t.createdAt).reversed());
         // 稳定排序：活跃任务提到前面，组内保持时间倒序
@@ -165,6 +170,9 @@ public class TaskManager {
                 continue;
             }
             if (modelId != null && !modelId.equals(t.modelId)) {
+                continue;
+            }
+            if (instanceId != null && !instanceId.equals(t.instanceId)) {
                 continue;
             }
             array.add(toJson(t));

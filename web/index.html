@@ -17,6 +17,7 @@
     </div>
     <div class="header-actions">
       <button id="voices-btn" class="theme-btn" data-i18n-title="voices.title" title="音色库">🎙</button>
+      <button id="dash-btn" class="theme-btn" data-i18n-title="dash.title" title="运行状态">📊</button>
       <button id="history-btn" class="theme-btn" data-i18n-title="history.title" title="操作历史">🕘</button>
       <button id="downloads-btn" class="theme-btn" data-i18n-title="dl.managerTitle" title="下载管理">⬇️<span id="dl-badge" class="dl-badge hidden">0</span></button>
       <button id="lang-toggle" class="theme-btn" data-i18n-title="header.langTitle" title="切换语言 / Switch language">EN</button>
@@ -151,6 +152,47 @@
       </div>
     </section>
   </main>
+
+  <!-- 运行状态全屏面板：页头 📊 打开。hub 状态 + GPU 指标 + 实例/任务/下载总览 + 事件流 -->
+  <div id="dash-panel" class="modal-overlay hidden">
+    <div class="history-panel-card">
+      <div class="history-header">
+        <span class="history-title" data-i18n="dash.title">运行状态</span>
+        <div class="history-actions">
+          <span id="dash-refreshed" class="hint"></span>
+          <button id="dash-close" type="button" class="theme-btn" data-i18n-title="history.closeTitle" title="关闭">×</button>
+        </div>
+      </div>
+      <div class="dash-body">
+        <div class="dash-grid">
+          <div class="card panel-card dash-card" id="dash-hub-card">
+            <h2 data-i18n="dash.hub">Hub</h2>
+            <div id="dash-hub-body" class="dash-kv"></div>
+          </div>
+          <div class="card panel-card dash-card" id="dash-gpu-card">
+            <h2 data-i18n="dash.gpu">GPU</h2>
+            <div id="dash-gpu-body" class="dash-gpu-list"></div>
+          </div>
+          <div class="card panel-card dash-card" id="dash-instances-card">
+            <h2 data-i18n="dash.instances">实例</h2>
+            <div id="dash-instances-body" class="dash-rows"></div>
+          </div>
+          <div class="card panel-card dash-card" id="dash-queues-card">
+            <h2 data-i18n="dash.queues">任务队列</h2>
+            <div id="dash-queues-body" class="dash-rows"></div>
+          </div>
+          <div class="card panel-card dash-card" id="dash-downloads-card">
+            <h2 data-i18n="dl.managerTitle">下载管理</h2>
+            <div id="dash-downloads-body" class="dash-rows"></div>
+          </div>
+        </div>
+        <div class="card panel-card dash-card" id="dash-events-card">
+          <h2 data-i18n="dash.events">事件</h2>
+          <div id="dash-events-body" class="dash-events"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- 操作历史全屏面板：页头 🕘 按钮弹出（按 modelId 记录，仅 TTS 有落盘历史） -->
   <div id="history-panel" class="modal-overlay hidden">

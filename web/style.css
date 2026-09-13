@@ -809,6 +809,15 @@ footer { padding: 4px 24px 18px; }
 }
 
 /* ---------- 事件 toast ---------- */
+@media (max-width: 720px) {
+  /* 移动端页头：品牌副标题隐藏，操作按钮允许换行（否则 7 个图标按钮撑出横向滚动） */
+  header { padding: 10px 14px; }
+  .subtitle { display: none; }
+  .header-actions { flex-wrap: wrap; justify-content: flex-end; row-gap: 8px; }
+  /* 移动端 GPU 走势图高度减半 */
+  .dash-spark-canvas { height: 26px; }
+}
+
 #toast-root {
   position: fixed;
   top: 70px;
@@ -1117,6 +1126,134 @@ footer { padding: 4px 24px 18px; }
 }
 
 #tts-variant-row select, #tts-speaker-row select { max-width: 340px; }
+
+/* ---------- 实例卡片副行（运行时长 / 排队任务数） ---------- */
+.card-subtle {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 4px;
+  opacity: 0.9;
+}
+
+/* ---------- 运行状态面板（页头 📊）：五卡网格 + 底部事件流 ---------- */
+.dash-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.dash-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+.dash-card { min-width: 0; }
+.dash-card h2 { margin: 0 0 10px; font-size: 14px; }
+.dash-kv { display: flex; flex-direction: column; gap: 8px; }
+.dash-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  align-items: baseline;
+}
+.dash-row-click { cursor: pointer; border-radius: 6px; }
+.dash-row-click:hover { background: var(--wave-bg); }
+.dash-row-selected { background: var(--wave-dim); }
+.dash-row-selected:hover { background: var(--wave-dim); }
+
+/* GPU 迷你走势图 */
+.dash-spark { margin-top: 8px; }
+.dash-spark-head { font-size: 11px; color: var(--text-dim); margin-bottom: 3px; }
+.dash-spark-canvas { width: 100%; height: 34px; display: block; }
+.dash-row-label { color: var(--text-dim); min-width: 0; word-break: break-all; }
+.dash-row-value { text-align: right; flex: none; }
+.dash-row-value.ok { color: var(--ok); }
+.dash-row-value.warn { color: var(--warn); }
+.dash-row-value.err { color: var(--err); }
+.dash-gpu { padding: 6px 0; }
+.dash-gpu + .dash-gpu { border-top: 1px solid var(--card-border); }
+.dash-gpu-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.dash-gpu-name { font-weight: 600; word-break: break-all; }
+.dash-gpu-temp { color: var(--text-dim); flex: none; }
+.dash-gpu-temp.hot { color: var(--err); font-weight: 700; }
+.dash-meter {
+  position: relative;
+  height: 16px;
+  background: var(--wave-bg);
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 4px 0;
+}
+.dash-meter-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--ok), var(--warn));
+  border-radius: 8px;
+  transition: width 0.5s ease;
+}
+.dash-meter-fill.indeterminate { background: var(--wave-dim); }
+.dash-meter-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--text);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+.dash-queue-group + .dash-queue-group { margin-top: 10px; }
+.dash-queue-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.dash-task-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12.5px;
+  padding: 3px 0;
+}
+.dash-task-left { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.dash-task-right { flex: none; }
+.dash-task-right.dim { color: var(--text-dim); }
+.dash-task-right.warn { color: var(--warn); }
+.dash-task-right.ok { color: var(--ok); }
+.dash-task-right.err { color: var(--err); }
+.dash-dl + .dash-dl { margin-top: 10px; }
+.dash-dl-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+  margin-bottom: 2px;
+}
+.dash-dl-name { font-weight: 600; word-break: break-all; }
+.dash-events { display: flex; flex-direction: column; gap: 2px; }
+.dash-event {
+  display: flex;
+  gap: 10px;
+  font-size: 12.5px;
+  padding: 3px 6px;
+  border-radius: 6px;
+}
+.dash-event.err { background: rgba(248, 113, 113, 0.12); }
+.dash-event.err .dash-event-msg { color: var(--err); }
+.dash-event-time { color: var(--text-dim); flex: none; font-variant-numeric: tabular-nums; }
+.dash-event-msg { min-width: 0; word-break: break-word; user-select: text; }
 
 /* ---------- TTS 操作历史（右侧边栏） ---------- */
 #history-panel .history-panel-card,

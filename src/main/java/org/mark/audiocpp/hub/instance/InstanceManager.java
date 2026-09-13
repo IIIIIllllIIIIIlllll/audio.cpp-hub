@@ -1,5 +1,6 @@
 package org.mark.audiocpp.hub.instance;
 
+import com.google.gson.JsonObject;
 import org.mark.audiocpp.hub.AudioHubServer;
 import org.mark.audiocpp.hub.util.Jsons;
 import org.mark.audiocpp.hub.util.UserException;
@@ -148,7 +149,11 @@ public class InstanceManager {
                 process = pb.start();
             } catch (IOException e) {
                 // 二进制缺失等：记事件、清掉已生成的运行目录后抛出，实例不进 map
-                events.add("error", "实例启动失败（" + executableName + "）: " + Jsons.summarize(e.getMessage()));
+                JsonObject startFailArgs = new JsonObject();
+                startFailArgs.addProperty("name", executableName);
+                startFailArgs.addProperty("reason", Jsons.summarize(e.getMessage()));
+                events.add("error", "evt.instanceStartFailed", startFailArgs,
+                        "实例启动失败（" + executableName + "）: " + Jsons.summarize(e.getMessage()));
                 log.error("进程拉起失败: {}", e.getMessage());
                 cleanupRunDir(id);
                 throw e;
@@ -160,7 +165,12 @@ public class InstanceManager {
             instances.put(id, instance);
             log.info("实例已启动: executable={}, name={}, modelId={}, backend={}, device={}, port={}, pid={}",
                     executableName, instanceName, modelId, backend, device, port, process.pid());
-            events.add("info", "实例 #" + id + " 启动中（" + executableName + "，端口 " + port + "）");
+            JsonObject startingArgs = new JsonObject();
+            startingArgs.addProperty("id", id);
+            startingArgs.addProperty("name", executableName);
+            startingArgs.addProperty("port", port);
+            events.add("info", "evt.instanceStarting", startingArgs,
+                    "实例 #" + id + " 启动中（" + executableName + "，端口 " + port + "）");
 
             Thread waiter = new Thread(() -> awaitReady(instance), "instance-watch-" + id);
             waiter.setDaemon(true);
@@ -192,7 +202,9 @@ public class InstanceManager {
                 }
             }
             log.info("实例已停止: port={}", instance.getPort());
-            events.add("info", "实例 #" + id + " 已停止");
+            JsonObject stoppedArgs = new JsonObject();
+            stoppedArgs.addProperty("id", id);
+            events.add("info", "evt.instanceStopped", stoppedArgs, "实例 #" + id + " 已停止");
             cleanupRunDir(id);
             return true;
         } finally {
@@ -241,8 +253,12 @@ public class InstanceManager {
                 if (process != null && !process.isAlive()) {
                     String reason = "实例 #" + id + " 进程提前退出 (exit=" + process.exitValue()
                             + ")，日志尾部: " + readLogTail(instance);
+                    JsonObject exitedArgs = new JsonObject();
+                    exitedArgs.addProperty("id", id);
+                    exitedArgs.addProperty("exit", process.exitValue());
+                    exitedArgs.addProperty("tail", readLogTail(instance));
                     log.error("实例进程提前退出: exit={}", process.exitValue());
-                    events.add("error", reason);
+                    events.add("error", "evt.instanceExited", exitedArgs, reason);
                     instances.remove(id);
                     cleanupRunDir(id);
                     return;
@@ -256,7 +272,11 @@ public class InstanceManager {
                     if (response.statusCode() == 200) {
                         instance.setStatus(ModelInstance.Status.READY);
                         log.info("实例就绪: port={}", instance.getPort());
-                        events.add("info", "实例 #" + id + " 已就绪（端口 " + instance.getPort() + "）");
+                        JsonObject readyArgs = new JsonObject();
+                        readyArgs.addProperty("id", id);
+                        readyArgs.addProperty("port", instance.getPort());
+                        events.add("info", "evt.instanceReady", readyArgs,
+                                "实例 #" + id + " 已就绪（端口 " + instance.getPort() + "）");
                         return;
                     }
                 } catch (IOException | InterruptedException e) {
@@ -274,7 +294,11 @@ public class InstanceManager {
                 }
             }
             log.error("实例等待就绪超时");
-            events.add("error", "实例 #" + id + " 等待就绪超时 (" + HEALTH_TIMEOUT_SECONDS
+            JsonObject timeoutArgs = new JsonObject();
+            timeoutArgs.addProperty("id", id);
+            timeoutArgs.addProperty("seconds", HEALTH_TIMEOUT_SECONDS);
+            timeoutArgs.addProperty("tail", readLogTail(instance));
+            events.add("error", "evt.instanceTimeout", timeoutArgs, "实例 #" + id + " 等待就绪超时 (" + HEALTH_TIMEOUT_SECONDS
                     + "s)，日志尾部: " + readLogTail(instance));
             instances.remove(id);
             cleanupRunDir(id);

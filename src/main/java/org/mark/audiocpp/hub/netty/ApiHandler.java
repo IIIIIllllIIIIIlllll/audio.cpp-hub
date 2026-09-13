@@ -33,6 +33,7 @@ import org.mark.audiocpp.hub.history.HistoryManager;
 import org.mark.audiocpp.hub.instance.DeviceLister;
 import org.mark.audiocpp.hub.instance.InstanceManager;
 import org.mark.audiocpp.hub.instance.ModelInstance;
+import org.mark.audiocpp.hub.monitor.SystemStatsCollector;
 import org.mark.audiocpp.hub.proxy.SpeechForwarder;
 import org.mark.audiocpp.hub.task.HubTask;
 import org.mark.audiocpp.hub.task.TaskManager;
@@ -75,6 +76,8 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
     private final FileSystemBrowser fileSystemBrowser = new FileSystemBrowser();
     // 与 TaskManager 共享同一实例：异步任务的 TTS 结果/失败记录与历史 API 读的是同一份索引
     private final HistoryManager historyManager;
+    /** 系统状态采集（GPU 指标 / hub 运行时长），无状态单例 */
+    private final SystemStatsCollector systemStats = new SystemStatsCollector();
 
     public ApiHandler(InstanceManager instanceManager, ExecutableRegistry executableRegistry,
                       ProfileRegistry profileRegistry, DownloadManager downloadManager,
@@ -186,10 +189,18 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         } else if (method.equals(HttpMethod.POST) && path.equals("/api/tasks")) {
             handleTaskCreate(ctx, request);
         } else if (method.equals(HttpMethod.GET) && path.equals("/api/tasks")) {
-            // ?active=1 只返回 QUEUED/RUNNING（前端页面加载重挂用）；?modelId= 按模型过滤
+            // ?active=1 只返回 QUEUED/RUNNING（前端页面加载重挂用）；?modelId= 按模型过滤；
+            // ?instanceId= 按实例过滤（仪表盘队列查看用）
             boolean activeOnly = "1".equals(firstParam(decoder, "active"));
             sendJson(ctx, HttpResponseStatus.OK,
-                    taskManager.list(activeOnly, firstParam(decoder, "modelId")).toString(), request);
+                    taskManager.list(activeOnly, firstParam(decoder, "modelId"),
+                            firstParam(decoder, "instanceId")).toString(), request);
+        } else if (path.startsWith("/api/system/stats")) {
+            // 系统状态：hub 运行时长/JVM 内存 + GPU 指标（nvidia-smi 不可用时降级，不报错）
+            JsonObject stats = new JsonObject();
+            stats.add("hub", systemStats.hubStats());
+            stats.add("gpu", systemStats.gpuStats());
+            sendJson(ctx, HttpResponseStatus.OK, stats.toString(), request);
         } else if (path.startsWith("/api/tasks/")) {
             handleTask(ctx, request, method, path.substring("/api/tasks/".length()));
         } else if (method.equals(HttpMethod.GET) && path.equals("/api/downloads")) {
