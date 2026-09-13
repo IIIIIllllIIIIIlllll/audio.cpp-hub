@@ -19,7 +19,9 @@ services:
     image: audio-cpp-hub:amd
     container_name: audio-cpp-hub-amd
     restart: unless-stopped
-    init: true
+    # Note: init:true is intentionally omitted — the sysctl it sets
+    # (net.ipv4.ip_unprivileged_port_start) is blocked inside Proxmox LXC containers.
+    # start-hub.sh handles SIGTERM correctly via trap.
     ports:
       - "18080:18080"
     environment:
