@@ -38,8 +38,8 @@ services:
       - /dev/dri:/dev/dri
       - /dev/kfd:/dev/kfd
     group_add:
-      - video
-      - render
+      - "${GPU_GID_VIDEO:-44}"    # video group GID (host-specific; set in .env file)
+      - "${GPU_GID_RENDER:-993}"  # render group GID (host-specific; set in .env file)
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
