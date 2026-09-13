@@ -12,6 +12,7 @@
 #   AUDIOCPP_BACKEND      — vulkan | cpu | cuda (default: vulkan)
 #   AUDIOCPP_DEVICE       — device index passed to the engine   (default: 0)
 #   AUDIOCPP_THREADS      — CPU thread count                    (default: 4)
+#   AUDIOCPP_MODE         — offline | streaming                 (default: offline)
 #   HUB_URL               — hub base URL (default: http://127.0.0.1:18080)
 #   WARMUP_TEXT           — sentence for warm-up inference      (default: short English)
 
@@ -24,6 +25,8 @@ WEIGHTS="${AUDIOCPP_WEIGHTS:-}"
 BACKEND="${AUDIOCPP_BACKEND:-vulkan}"
 DEVICE="${AUDIOCPP_DEVICE:-0}"
 THREADS="${AUDIOCPP_THREADS:-4}"
+AUDIOCPP_MODE="${AUDIOCPP_MODE:-offline}"
+MODE="$AUDIOCPP_MODE"
 WARMUP_TEXT="${WARMUP_TEXT:-This is a short startup warm-up.}"
 WARMUP_WAV="/tmp/audio-cpp-hub-warmup.wav"
 WAIT_SECONDS=180
@@ -60,7 +63,7 @@ if [[ -z "$line" ]]; then
   log "No existing instance '$SERVICE_NAME'; starting model=$MODEL_ID backend=$BACKEND device=$DEVICE"
   curl -fsS --max-time 15 -X POST "$HUB_URL/api/instances" \
     -H 'Content-Type: application/json' \
-    --data-raw "{\"modelId\":\"$MODEL_ID\",\"name\":\"$SERVICE_NAME\",\"weightsPath\":\"$WEIGHTS\",\"backend\":\"$BACKEND\",\"device\":$DEVICE,\"threads\":$THREADS}" \
+    --data-raw "{\"modelId\":\"$MODEL_ID\",\"name\":\"$SERVICE_NAME\",\"weightsPath\":\"$WEIGHTS\",\"backend\":\"$BACKEND\",\"device\":$DEVICE,\"threads\":$THREADS,\"mode\":\"$MODE\"}" \
     >/tmp/audio-cpp-hub-start.json \
     || fatal "hub rejected the instance start request"
   line="$(instance_line || true)"

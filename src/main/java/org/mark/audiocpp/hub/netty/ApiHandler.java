@@ -276,6 +276,28 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
                             "modelId 不在注册表中: " + modelId), request);
             return;
         }
+        String mode = optString(body, "mode");
+        if (mode == null || mode.isBlank()) {
+            mode = "offline";
+        } else {
+            mode = mode.trim();
+        }
+        if (modelEntry.has("modes") && modelEntry.get("modes").isJsonArray()) {
+            JsonArray allowedModes = modelEntry.getAsJsonArray("modes");
+            boolean allowed = false;
+            for (JsonElement m : allowedModes) {
+                if (m.isJsonPrimitive() && mode.equals(m.getAsString())) {
+                    allowed = true;
+                    break;
+                }
+            }
+            if (!allowed) {
+                sendJson(ctx, HttpResponseStatus.BAD_REQUEST,
+                        Jsons.error("MODE_UNSUPPORTED", Map.of("mode", mode, "modelId", modelId),
+                                "模型 " + modelId + " 不支持模式: " + mode), request);
+                return;
+            }
+        }
         if (weightsPath == null || weightsPath.isEmpty()) {
             sendJson(ctx, HttpResponseStatus.BAD_REQUEST,
                     Jsons.error("WEIGHTS_REQUIRED", null, "weightsPath 不能为空"), request);
@@ -348,7 +370,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         }
         try {
             ModelInstance instance = instanceManager.start(modelId, engineFamily, resolvedWeights, backend, device, port,
-                    threads, executablePath, executableName, serverTask, env, optString(body, "name"), sessionOptions);
+                    threads, executablePath, executableName, serverTask, env, optString(body, "name"), mode, sessionOptions);
             sendJson(ctx, HttpResponseStatus.OK, Jsons.GSON.toJson(toJson(instance)), request);
         } catch (Exception e) {
             log.error("启动实例失败", e);
@@ -1319,6 +1341,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         map.put("device", instance.getDevice());
         map.put("executableName", instance.getExecutableName());
         map.put("threads", instance.getThreads());
+        map.put("mode", instance.getMode());
         map.put("sessionOptions", instance.getSessionOptions());
         map.put("status", instance.getStatus().name());
         map.put("createdAt", instance.getCreatedAt().toString());

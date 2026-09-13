@@ -18,6 +18,7 @@ public class ModelInstance {
     private final Integer device;
     private final String executableName;
     private final Integer threads;
+    private final String mode;
     private final Map<String, String> sessionOptions;
     private final Path serverJsonPath;
     private final Instant createdAt = Instant.now();
@@ -27,13 +28,20 @@ public class ModelInstance {
 
     public ModelInstance(String id, String instanceName, String modelId, String weightsPath, int port,
                          String backend, Integer device, String executableName, Path serverJsonPath) {
-        this(id, instanceName, modelId, weightsPath, port, backend, device, executableName, null, null,
+        this(id, instanceName, modelId, weightsPath, port, backend, device, executableName, null, null, null,
                 serverJsonPath);
     }
 
     public ModelInstance(String id, String instanceName, String modelId, String weightsPath, int port,
                          String backend, Integer device, String executableName, Integer threads,
                          Map<String, String> sessionOptions, Path serverJsonPath) {
+        this(id, instanceName, modelId, weightsPath, port, backend, device, executableName, threads, null,
+                sessionOptions, serverJsonPath);
+    }
+
+    public ModelInstance(String id, String instanceName, String modelId, String weightsPath, int port,
+                         String backend, Integer device, String executableName, Integer threads,
+                         String mode, Map<String, String> sessionOptions, Path serverJsonPath) {
         this.id = id;
         this.instanceName = instanceName;
         this.modelId = modelId;
@@ -43,6 +51,7 @@ public class ModelInstance {
         this.device = device;
         this.executableName = executableName;
         this.threads = threads;
+        this.mode = mode != null ? mode : "offline";
         this.sessionOptions = sessionOptions == null ? Map.of() : Map.copyOf(sessionOptions);
         this.serverJsonPath = serverJsonPath;
     }
@@ -58,6 +67,8 @@ public class ModelInstance {
     public String getExecutableName() { return executableName; }
     /** 启动时的线程数，null 表示自动（CPU 核心数）。 */
     public Integer getThreads() { return threads; }
+    /** 实例运行模式（offline / streaming）。 */
+    public String getMode() { return mode; }
     /** 启动时的 session_options 高级参数（字符串表），无则为空表。 */
     public Map<String, String> getSessionOptions() { return sessionOptions; }
     public Path getServerJsonPath() { return serverJsonPath; }

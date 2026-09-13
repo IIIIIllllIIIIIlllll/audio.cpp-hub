@@ -464,7 +464,7 @@
     "descriptionEn": "BreezeTTS 2 bilingual speech synthesis: design a voice without reference audio, or clone one when reference audio is provided.",
     "category": "tts",
     "serverTask": "tts",
-    "modes": ["offline"],
+    "modes": ["offline", "streaming"],
     "inputs": { "text": "required", "audio": "none", "voiceRef": "optional" },
     "outputType": "audio",
     "paramSchema": {
