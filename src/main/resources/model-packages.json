@@ -2451,19 +2451,19 @@
             "local": "yue2-vae-f16.gguf"
           },
           {
-            "remote": "yue2-model-config.json",
+            "remote": "sidecars/yue2-model-config.json",
             "local": "yue2-model-config.json"
           },
           {
-            "remote": "yue2-generation-config.json",
+            "remote": "sidecars/yue2-generation-config.json",
             "local": "yue2-generation-config.json"
           },
           {
-            "remote": "yue2-qwen.tiktoken",
+            "remote": "sidecars/yue2-qwen.tiktoken",
             "local": "yue2-qwen.tiktoken"
           },
           {
-            "remote": "yue2-vae-config.json",
+            "remote": "sidecars/yue2-vae-config.json",
             "local": "yue2-vae-config.json"
           }
         ]
