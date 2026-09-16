@@ -11,7 +11,7 @@ Repository: <https://github.com/IIIIIllllIIIIIlllll/audio.cpp-hub>
 - **Multi-instance management**: generates a config for each model instance and launches `audiocpp_server` as a subprocess — automatic port allocation (bound to 127.0.0.1), health polling, log viewing, one-click stop
 - **Web UI**: plain HTML/JS frontend (no build step), bilingual Chinese/English, with model selection, parameter forms and task submission
 - **TTS operation history**: per-model history of the latest 50 entries / 500MB of synthesis records and result audio, replayable anytime from a right-hand sidebar, with lazy audio loading
-- **OpenAI-compatible proxy**: `GET /v1/models` lists all ready instances; endpoints like `POST /v1/audio/speech` are routed by service name and forwarded — large base64 payloads are streamed through disk the whole way and never enter the JVM heap, so any OpenAI client works out of the box
+- **OpenAI-compatible proxy**: `GET /v1/models` lists all ready instances; endpoints like `POST /v1/audio/speech` are routed by service name and forwarded — large base64 payloads are streamed through disk the whole way and never enter the JVM heap, so any OpenAI client works out of the box (see OpenAI API Compatibility below for the boundary)
 - **Optional HTTPS**: TLS and plain HTTP are auto-detected on the same port (plain HTTP gets a 308 redirect), with built-in one-click generation of a self-signed CA + server certificate
 - **Windows-friendly**: system tray, registry-based auto-start, and a C launcher (double-click to run with an embedded JRE)
 - **Lightweight**: the hub itself loads no models; recommended JVM flags are `-Xms128m -Xmx128m`
@@ -51,6 +51,18 @@ Optional: build the C launcher (requires CMake 3.16+ and a compiler) — see [la
 2. **Create a launch profile**: pick a model and parameters (model weight paths can be picked via the built-in file browser)
 3. **Start an instance**: the hub writes `run/<id>/server.json` and launches the subprocess; once the health check passes it is ready to use
 4. **Submit tasks**: run inference directly in the web UI, or call the OpenAI-compatible API (`model` = instance service name)
+
+## OpenAI API Compatibility
+
+The hub's `/v1/*` endpoints are a **transparent proxy** to each `audiocpp_server` instance: the hub never modifies request bodies, so the compatibility boundary is set by the upstream `audiocpp_server` and the specific model.
+
+- Standard OpenAI clients (OpenAI SDK, Open WebUI, etc.) can be pointed straight at the common request shapes: `POST /v1/audio/speech` (`model` / `input` / `voice` / `response_format`), `POST /v1/audio/transcriptions` (multipart upload), `GET /v1/models`.
+- **Full compatibility with the standard OpenAI interface is not guaranteed, and the root cause is on the model side**: audio.cpp aggregates many model families, and the parameters each model requires/accepts differ — the same request that works on model A can fail outright on model B. For example:
+  - Voice-cloning models (IndexTTS2, Qwen3-TTS Base, ...) have no built-in voices, so a bare `model` + `input` request fails; you must additionally supply reference audio via `voice_ref`;
+  - Qwen3-TTS CustomVoice uses `voice` as a packaged speaker name, while the VoiceDesign variant takes a natural-language voice description in `instructions`;
+  - Some standard OpenAI parameters are not supported upstream and are silently ignored, e.g. `speed` and `modalities` on speech, or `response_format=srt/vtt/verbose_json` on transcriptions;
+  - Some models strictly validate unknown options, so sending a parameter they do not recognize can make them reject the entire request.
+- The `inputs` declaration in `resources/models.json` (which drives the web UI's parameter form) states the required inputs for each model. When a parameter has no effect or a request errors, consult that model's documentation first (the audio.cpp repo's `docs/models/`) — this is usually not a hub forwarding issue.
 
 ## Configuration
 

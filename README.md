@@ -11,7 +11,7 @@
 - **多实例管理**：为每个模型实例生成配置并以子进程拉起 `audiocpp_server`，自动分配端口（绑定 127.0.0.1）、轮询健康状态、查看日志、一键停止
 - **Web UI**：纯原生 HTML/JS 界面（无构建步骤），中英双语，支持模型选择、参数表单、任务提交
 - **TTS 操作历史**：按模型隔离保存最近 50 条 / 500MB 的合成记录与结果音频，右侧边栏随时回听，音频懒加载
-- **OpenAI 兼容代理**：`GET /v1/models` 列出全部就绪实例；`POST /v1/audio/speech` 等接口按服务名路由转发，大 base64 全程流式落盘转发，不进 JVM 堆，可直接对接各类 OpenAI 客户端
+- **OpenAI 兼容代理**：`GET /v1/models` 列出全部就绪实例；`POST /v1/audio/speech` 等接口按服务名路由转发，大 base64 全程流式落盘转发，不进 JVM 堆，可直接对接各类 OpenAI 客户端（兼容边界见下文「OpenAI 接口兼容性」）
 - **HTTPS 支持（可选）**：同端口自动识别 TLS / 纯 HTTP（后者 308 跳转），内置一键生成自签 CA + 服务器证书
 - **Windows 友好**：系统托盘、注册表开机自启、C 语言启动器（内嵌 JRE 双击即用）
 - **轻量**：hub 本身不加载模型，推荐 JVM 参数 `-Xms128m -Xmx128m`
@@ -51,6 +51,18 @@ java -cp "build/classes:lib/*" org.mark.audiocpp.hub.AudioHubServer   # Linux
 2. **创建启动档案**：选择模型与参数（模型权重路径可通过内置文件浏览器选择）
 3. **启动实例**：hub 写入 `run/<id>/server.json` 并拉起子进程，健康检查通过后即可使用
 4. **提交任务**：在 Web UI 直接推理，或通过 OpenAI 兼容接口调用（`model` 填实例服务名）
+
+## OpenAI 接口兼容性
+
+hub 的 `/v1/*` 接口是对各 `audiocpp_server` 实例的**透明代理**：hub 不修改请求体，兼容边界由上游 `audiocpp_server` 与具体模型决定。
+
+- 标准 OpenAI 客户端（OpenAI SDK、Open WebUI 等）可直接对接通用形状的请求：`POST /v1/audio/speech`（`model` / `input` / `voice` / `response_format`）、`POST /v1/audio/transcriptions`（multipart 上传）、`GET /v1/models`。
+- **但不保证完全兼容标准 OpenAI 接口，根因在模型侧**：audio.cpp 聚合了多个模型家族，不同模型要求 / 接受的参数并不相同，同一个请求在 A 模型上可用、在 B 模型上可能直接报错。例如：
+  - 声音克隆模型（IndexTTS2、Qwen3-TTS Base 等）没有内置音色，纯 `model` + `input` 的请求会失败，必须额外提供 `voice_ref` 参考音频；
+  - Qwen3-TTS CustomVoice 用 `voice` 填内置说话人名，VoiceDesign 变体则用 `instructions` 以自然语言描述音色；
+  - 部分 OpenAI 标准参数上游并不支持、会被静默忽略，如 speech 的 `speed`、`modalities`，transcriptions 的 `response_format=srt/vtt/verbose_json` 等；
+  - 个别模型会严格校验未知选项，传入其不认识的参数可能导致整个请求被拒绝。
+- `resources/models.json` 中的 `inputs` 声明（Web UI 参数表单据此渲染）给出了每个模型各自的必需输入。参数不生效或请求报错时，请先对照该模型的参数文档（audio.cpp 仓库的 `docs/models/`），这通常不是 hub 转发的问题。
 
 ## 配置
 
