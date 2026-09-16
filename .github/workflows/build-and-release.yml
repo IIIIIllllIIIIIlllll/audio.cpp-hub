@@ -178,14 +178,14 @@ jobs:
           -Djava.class.path=./classes:./lib/gson-2.8.9.jar:./lib/netty-all-4.1.35.Final.jar:./lib/log4j-api-2.22.1.jar:./lib/log4j-core-2.22.1.jar:./lib/log4j-slf4j2-impl-2.22.1.jar:./lib/slf4j-api-2.0.9.jar
           -Xms128m
           -Xmx128m
-          -XX:MaxDirectMemorySize=128m
+          -XX:MaxDirectMemorySize=256m
           EOF
           cat > launcher.conf.win << 'EOF'
           ##MAINCLASS=org.mark.audiocpp.hub.AudioHubServer
           -Djava.class.path=./classes;./lib/gson-2.8.9.jar;./lib/netty-all-4.1.35.Final.jar;./lib/log4j-api-2.22.1.jar;./lib/log4j-core-2.22.1.jar;./lib/log4j-slf4j2-impl-2.22.1.jar;./lib/slf4j-api-2.0.9.jar
           -Xms128m
           -Xmx128m
-          -XX:MaxDirectMemorySize=128m
+          -XX:MaxDirectMemorySize=256m
           EOF
 
       - name: 定位并收集启动器产物
@@ -217,7 +217,7 @@ jobs:
           # Normally no adjustment needed. Only increase if you encounter
           # OutOfMemoryError (e.g. many concurrent connections or large uploads).
           # ============================================================
-          ./jre/bin/java -Xms128m -Xmx128m -XX:MaxDirectMemorySize=128m -classpath "./classes:./lib/*" org.mark.audiocpp.hub.AudioHubServer "$@"
+          ./jre/bin/java -Xms128m -Xmx128m -XX:MaxDirectMemorySize=256m -classpath "./classes:./lib/*" org.mark.audiocpp.hub.AudioHubServer "$@"
           EOF
           chmod +x build/run.sh
 
@@ -239,7 +239,7 @@ jobs:
           rem Normally no adjustment needed. Only increase if you encounter
           rem OutOfMemoryError (e.g. many concurrent connections or large uploads).
           rem ============================================================
-          start "" jre\bin\javaw.exe -Xms128m -Xmx128m -XX:MaxDirectMemorySize=128m -classpath "./classes;./lib/*" org.mark.audiocpp.hub.AudioHubServer %*
+          start "" jre\bin\javaw.exe -Xms128m -Xmx128m -XX:MaxDirectMemorySize=256m -classpath "./classes;./lib/*" org.mark.audiocpp.hub.AudioHubServer %*
           EOF
 
       - name: 创建启动脚本 (平台无关, 使用系统 Java)
@@ -261,7 +261,7 @@ jobs:
           # Normally no adjustment needed. Only increase if you encounter
           # OutOfMemoryError (e.g. many concurrent connections or large uploads).
           # ============================================================
-          java -Xms128m -Xmx128m -XX:MaxDirectMemorySize=128m -classpath "./classes:./lib/*" org.mark.audiocpp.hub.AudioHubServer "$@"
+          java -Xms128m -Xmx128m -XX:MaxDirectMemorySize=256m -classpath "./classes:./lib/*" org.mark.audiocpp.hub.AudioHubServer "$@"
           EOF
           chmod +x build-standalone/run.sh
           cat > build-standalone/run.bat << 'EOF'
@@ -280,7 +280,7 @@ jobs:
           rem Normally no adjustment needed. Only increase if you encounter
           rem OutOfMemoryError (e.g. many concurrent connections or large uploads).
           rem ============================================================
-          start "" javaw.exe -Xms128m -Xmx128m -XX:MaxDirectMemorySize=128m -classpath "./classes;./lib/*" org.mark.audiocpp.hub.AudioHubServer %*
+          start "" javaw.exe -Xms128m -Xmx128m -XX:MaxDirectMemorySize=256m -classpath "./classes;./lib/*" org.mark.audiocpp.hub.AudioHubServer %*
           EOF
 
       - name: 复制文档到 build 目录

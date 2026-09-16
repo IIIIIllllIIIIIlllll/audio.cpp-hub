@@ -22,7 +22,7 @@ cmake --build launcher\build --config Release
 -Djava.class.path=classes;libs\gson-2.8.9.jar;libs\netty-all-4.1.35.Final.jar
 -Xms128m
 -Xmx128m
--XX:MaxDirectMemorySize=128m
+-XX:MaxDirectMemorySize=256m
 ```
 
 - `##MAINCLASS=`（12 字符前缀）指定入口类，写全限定名用 `.` 分隔

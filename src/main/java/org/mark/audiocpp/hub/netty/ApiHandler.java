@@ -4,10 +4,9 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.DefaultFileRegion;
 import io.netty.channel.SimpleChannelInboundHandler;
-import io.netty.handler.codec.http.DefaultHttpContent;
 import io.netty.handler.codec.http.DefaultHttpResponse;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.HttpHeaderNames;
@@ -44,13 +43,12 @@ import org.mark.audiocpp.hub.util.WeightsPaths;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.BufferedInputStream;
 import java.io.IOException;
-import java.io.InputStream;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -679,7 +677,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         }
         historyManager.recordTts(instance, body, taskId, result, error);
         // 响应 JSON 原样回写前端（分块流式，写完删临时文件）
-        sendFileChunked(ctx, HttpResponseStatus.OK, "application/json; charset=utf-8", tmp, request, true);
+        sendFile(ctx, HttpResponseStatus.OK, "application/json; charset=utf-8", tmp, request, true);
     }
 
     /* ---------- 异步推理任务（/api/tasks） ---------- */
@@ -753,7 +751,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
                         Jsons.error("RESULT_NOT_FOUND", Map.of("id", id),
                                 "结果不存在（TTS 结果请走 /api/history）: " + id), request);
             } else {
-                sendFileChunked(ctx, HttpResponseStatus.OK, "application/json; charset=utf-8",
+                sendFile(ctx, HttpResponseStatus.OK, "application/json; charset=utf-8",
                         resultFile, request, false);
             }
         } else if (method.equals(HttpMethod.DELETE)) {
@@ -922,7 +920,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
                             Jsons.error("HISTORY_NOT_FOUND", null, "历史参考音频不存在"), request);
                     return;
                 }
-                sendFileChunked(ctx, HttpResponseStatus.OK, "audio/wav", wav, request, false);
+                sendFile(ctx, HttpResponseStatus.OK, "audio/wav", wav, request, false);
             } else if (method.equals(HttpMethod.GET) && audio) {
                 Path wav = historyManager.audioPath(modelId, taskId);
                 if (wav == null) {
@@ -930,7 +928,7 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
                             Jsons.error("HISTORY_NOT_FOUND", null, "历史音频不存在"), request);
                     return;
                 }
-                sendFileChunked(ctx, HttpResponseStatus.OK, "audio/wav", wav, request, false);
+                sendFile(ctx, HttpResponseStatus.OK, "audio/wav", wav, request, false);
             } else if (method.equals(HttpMethod.GET)) {
                 JsonObject rec = historyManager.get(modelId, taskId);
                 if (rec == null) {
@@ -1028,16 +1026,21 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
     }
 
     /**
-     * 文件流式回写（Content-Length 已知，分块写避免整文件进堆）；deleteAfter 在写出完成后删除文件。
+     * 文件流式回写（Content-Length 已知），用 FileRegion 走内核 transferTo 发送。
+     * 整个文件不进 JVM 堆也不进 direct 内存，不受 MaxDirectMemorySize 上限影响：
+     * 若逐块读文件写 ByteBuf，Netty 出站链路会把它拷进池化 direct 缓冲区，
+     * 大文件会耗尽 direct 内存（128m）导致传输中途挂起，客户端长时间收不到任何字节。
      * 不能用 chunked：浏览器 <audio> 需要 Content-Length 才能算出总时长。
-     * 在 eventLoop 上同步读文件，与 handleRun 的阻塞转发同款取舍（本地单用户）。
+     * deleteAfter 在写出完成后删除文件（写出失败时同样删除）。
      */
-    private void sendFileChunked(ChannelHandlerContext ctx, HttpResponseStatus status, String contentType,
-                                 Path file, FullHttpRequest request, boolean deleteAfter) {
+    private void sendFile(ChannelHandlerContext ctx, HttpResponseStatus status, String contentType,
+                          Path file, FullHttpRequest request, boolean deleteAfter) {
         boolean keepAlive = HttpUtil.isKeepAlive(request);
         long length;
+        FileChannel channel;
         try {
             length = Files.size(file);
+            channel = FileChannel.open(file, StandardOpenOption.READ);
         } catch (IOException e) {
             sendJson(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR,
                     Jsons.error("FILE_IO", null, "文件读取失败: " + e.getMessage()), request);
@@ -1052,28 +1055,25 @@ public class ApiHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
             head.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE);
         }
         ctx.write(head);
-        try (InputStream in = new BufferedInputStream(Files.newInputStream(file), 64 * 1024)) {
-            byte[] buf = new byte[8192];
-            int n;
-            while ((n = in.read(buf)) >= 0) {
-                ctx.write(new DefaultHttpContent(Unpooled.wrappedBuffer(Arrays.copyOf(buf, n))));
-            }
-        } catch (IOException e) {
-            log.warn("文件回写中断: {}", e.getMessage());
-            if (deleteAfter) {
-                deleteQuietly(file);
-            }
-            ctx.close();
-            return;
+        if (length > 0) {
+            ctx.write(new DefaultFileRegion(channel, 0, length));
         }
         ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT).addListener(f -> {
+            closeQuietly(channel);
             if (deleteAfter) {
                 deleteQuietly(file);
             }
-            if (!keepAlive) {
+            if (!f.isSuccess() || !keepAlive) {
                 ctx.close();
             }
         });
+    }
+
+    private void closeQuietly(FileChannel channel) {
+        try {
+            channel.close();
+        } catch (IOException ignored) {
+        }
     }
 
     private void deleteQuietly(Path file) {

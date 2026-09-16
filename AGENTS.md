@@ -109,7 +109,7 @@ java -cp "build/classes:lib/*" org.mark.audiocpp.hub.AudioHubServer    # Linux
 
 `pom.xml` 仅作为 Eclipse 工程引子存在（system-scope 依赖也不会打进 jar），`target/classes` 下的旧产物是 IDE 生成的，不是正式构建输出。
 
-推荐 JVM 参数：`-Xms128m -Xmx128m -XX:MaxDirectMemorySize=128m`（模型由外部进程加载，hub 本身很轻量）。
+推荐 JVM 参数：`-Xms128m -Xmx128m -XX:MaxDirectMemorySize=256m`（模型由外部进程加载，hub 本身很轻量；direct 内存给 256m 是因为 Netty 4.1 池化分配器按 arena 预留 16MB direct 块，多核机器上多个 event loop 的基线占用接近 128m，给低了会在大文件/代理流式传输时耗尽挂起）。
 
 工作目录需包含 `web/`（静态文件）、`lib/`（依赖）；首次运行后自行生成 `hub.config.json` / `data/` / `logs/` 等。
 
