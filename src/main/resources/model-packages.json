@@ -2426,6 +2426,50 @@
       }
     ]
   },
+  "yue2": {
+    "displayName": "YuE2",
+    "category": "audio_generation",
+    "status": "supported",
+    "packages": [
+      {
+        "id": "yue2_3b_q8_0",
+        "displayName": "YuE2 3B Q8_0 + VAE F16 GGUF",
+        "format": "gguf",
+        "precision": "q8_0",
+        "default": true,
+        "repo": "audio-cpp/Yue2-3B-GGUF",
+        "revision": "main",
+        "gated": false,
+        "targetDir": "Yue2-3B-GGUF",
+        "files": [
+          {
+            "remote": "yue2-3b-q8_0.gguf",
+            "local": "yue2-3b-q8_0.gguf"
+          },
+          {
+            "remote": "yue2-vae-f16.gguf",
+            "local": "yue2-vae-f16.gguf"
+          },
+          {
+            "remote": "yue2-model-config.json",
+            "local": "yue2-model-config.json"
+          },
+          {
+            "remote": "yue2-generation-config.json",
+            "local": "yue2-generation-config.json"
+          },
+          {
+            "remote": "yue2-qwen.tiktoken",
+            "local": "yue2-qwen.tiktoken"
+          },
+          {
+            "remote": "yue2-vae-config.json",
+            "local": "yue2-vae-config.json"
+          }
+        ]
+      }
+    ]
+  },
   "supertonic": {
     "displayName": "Supertonic 3",
     "category": "tts",

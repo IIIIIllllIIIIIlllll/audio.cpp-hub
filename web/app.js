@@ -6,12 +6,12 @@ function statusText(s) {
   const v = t("instance.status." + s);
   return v === "instance.status." + s ? s : v;
 }
-const CATEGORY_ORDER = ["tts", "asr", "sep", "other"];
+const CATEGORY_ORDER = ["tts", "asr", "sep", "music", "other"];
 function categoryName(cat) {
   return t("category." + cat);
 }
-const SUBMIT_BTNS = ["tts-submit", "asr-submit", "sep-submit", "other-submit"];
-const SUBMIT_KEYS = { "tts-submit": "tts.submit", "asr-submit": "asr.submit", "sep-submit": "sep.submit", "other-submit": "other.submit" };
+const SUBMIT_BTNS = ["tts-submit", "asr-submit", "sep-submit", "music-submit", "other-submit"];
+const SUBMIT_KEYS = { "tts-submit": "tts.submit", "asr-submit": "asr.submit", "sep-submit": "sep.submit", "music-submit": "music.submit", "other-submit": "other.submit" };
 function submitLabel(id) {
   return t(SUBMIT_KEYS[id]);
 }
@@ -1427,7 +1427,7 @@ function showToast(level, message) {
 const activePolls = new Map(); // taskId → intervalId
 const taskViews = new Map(); // taskId → 已知任务（进行中 + 已完成保留展示），供侧栏渲染
 const taskDetails = new Map(); // taskId → 已展开的完整结果文本（侧栏「详情」缓存，随任务记录清除）
-const TASK_VERB = { tts: "tts.verb", asr: "asr.verb", sep: "sep.verb", other: "other.verb" };
+const TASK_VERB = { tts: "tts.verb", asr: "asr.verb", sep: "sep.verb", music: "music.verb", other: "other.verb" };
 
 async function submitTask(req) {
   const res = await fetch("/api/tasks", {
@@ -1539,6 +1539,7 @@ async function renderTaskResult(task) {
     const json = JSON.parse(text);
     if (task.category === "asr") renderAsrResult(json);
     else if (task.category === "sep") renderSepResult(json);
+    else if (task.category === "music") renderMusicResult(json);
     else renderOtherResult(json);
   } catch (e) {
     const msg = $(task.category + "-msg");
@@ -1612,12 +1613,13 @@ function clearResult(container) {
 function renderWorkspace() {
   const m = selectedModel();
   if (!m) return;
-  for (const cat of ["tts", "asr", "sep", "other"]) {
+  for (const cat of ["tts", "asr", "sep", "music", "other"]) {
     $("panel-" + cat).classList.toggle("hidden", cat !== m.category);
   }
   if (m.category === "tts") renderTtsPanel(m);
   else if (m.category === "asr") renderAsrPanel(m);
   else if (m.category === "sep") renderSepPanel(m);
+  else if (m.category === "music") renderMusicPanel(m);
   else renderOtherPanel(m);
   // 面板重渲染后刷新侧栏并重挂该模型的进行中任务（恢复进度显示）
   loadHistory();
@@ -2959,6 +2961,92 @@ $("sep-submit").onclick = async () => {
     msg.textContent = e.message;
   }
 };
+
+/* ---------- YuE2 音乐生成面板 ---------- */
+/* 单首歌耗时数分钟：请求携带较长的空闲等待超时，避免引擎锁排队时收到 503 server_busy
+   （实际生效值受服务端配置上限钳制）。采样参数（abc_* / semantic_*）走通用高级参数网格。 */
+const YUE2_BUSY_TIMEOUT_MS = 900000;
+
+function renderMusicPanel(m) {
+  $("music-title").textContent = t("music.title") + " — " + I18N.pick(m, "displayName");
+  const cotSel = $("music-cot");
+  cotSel.innerHTML = "";
+  for (const mode of ["off", "melody", "full"]) {
+    const opt = document.createElement("option");
+    opt.value = mode;
+    opt.textContent = mode + " — " + t("music.cot." + mode);
+    cotSel.appendChild(opt);
+  }
+  cotSel.value = "full";
+
+  const hasAdvanced = renderAdvancedGrid($("music-advanced-grid"), m, "music-adv");
+  $("music-advanced").classList.toggle("hidden", !hasAdvanced);
+
+  clearResult($("music-result"));
+  $("music-msg").textContent = "";
+  $("music-stats").textContent = "";
+}
+
+$("music-submit").onclick = async () => {
+  const m = selectedModel();
+  const msg = $("music-msg");
+  msg.textContent = "";
+  clearResult($("music-result"));
+  if (!activeInstanceId) { msg.textContent = t("instance.noReady"); return; }
+
+  const style = $("music-style").value.trim();
+  const lyrics = $("music-lyrics").value.trim();
+  const cot = $("music-cot").value;
+  const abc = $("music-abc").value.trim();
+  if (!style) { msg.textContent = t("music.errNoStyle"); return; }
+  if (!lyrics) { msg.textContent = t("music.errNoLyrics"); return; }
+  if (abc && cot === "off") { msg.textContent = t("music.errAbcCot"); return; }
+
+  // yue2 全部专属参数放 options；text 既作任务记录预览，也是引擎的歌词回退通道
+  const options = { style, lyrics, cot };
+  if (abc) options.abc = abc;
+  const req = {
+    text: lyrics,
+    lyrics: lyrics,
+    options,
+    busy_timeout_ms: YUE2_BUSY_TIMEOUT_MS
+  };
+  // 种子：超过 2^53 的整数用 JSON number 会丢精度，按协议以字符串传输
+  const seed = $("music-seed").value.trim();
+  if (seed) req.seed = /^\d+$/.test(seed) && seed.length > 15 ? seed : parseInt(seed, 10);
+
+  // cfg_scale / num_inference_steps / abc_* / semantic_* 由通用收集写入 options
+  collectParams(m, "music-adv", req);
+
+  // 异步任务：提交即返回，排队/进度由 trackTask 轮询展示
+  $("music-stats").textContent = "";
+  try {
+    trackTask(await submitTask(req));
+  } catch (e) {
+    msg.textContent = e.message;
+  }
+};
+
+/* 音乐结果：JSON 含 base64 wav 与 timing（wall_ms / audio_duration_ms / rtf） */
+function renderMusicResult(json) {
+  const out = $("music-result");
+  clearResult(out);
+  if (json.audio) {
+    out.appendChild(makeTrackRow("music", json.audio));
+    const timing = json.timing;
+    if (timing) {
+      const line = el(`<div class="hint music-timing"></div>`);
+      line.textContent = t("music.timingLine", {
+        wall: ((timing.wall_ms || 0) / 1000).toFixed(1) + "s",
+        dur: ((timing.audio_duration_ms || 0) / 1000).toFixed(1) + "s",
+        rtf: timing.rtf != null ? Number(timing.rtf).toFixed(2) : "?"
+      });
+      out.appendChild(line);
+    }
+  } else {
+    $("music-msg").textContent = t("music.noAudio") + JSON.stringify(json).substring(0, 300);
+  }
+}
 
 /* ---------- OTHER 面板 ---------- */
 function renderOtherPanel(m) {

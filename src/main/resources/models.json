@@ -561,5 +561,44 @@
       "guidance_scale": { "type": "number", "default": 2.0, "min": 0.0, "max": 20.0, "step": 0.1 },
       "retry_badcase": { "type": "boolean", "default": true }
     }
+  },
+  {
+    "id": "yue2",
+    "family": "yue2",
+    "ggufUrl": "https://huggingface.co/audio-cpp/Yue2-3B-GGUF",
+    "displayName": "YuE2 音乐生成",
+    "displayNameEn": "YuE2 Music Generation",
+    "description": "YuE2 歌词驱动的音乐生成：风格提示词 + 歌词整曲合成，支持内联 ABC 旋律条件（cot=melody / full）。单首歌耗时数分钟，生成请求内部串行。",
+    "descriptionEn": "YuE2 lyrics-driven music generation: full songs from a style prompt plus lyrics, with optional inline ABC melody conditioning (cot=melody / full). One song takes several minutes and requests are serialized internally.",
+    "category": "music",
+    "serverTask": "gen",
+    "modes": ["offline"],
+    "inputs": { "text": "required", "audio": "none", "voiceRef": "none" },
+    "outputType": "audio",
+    "task": "gen",
+    "requiredFiles": [
+      "yue2-model-config.json",
+      "yue2-generation-config.json",
+      "yue2-qwen.tiktoken",
+      "yue2-vae-config.json"
+    ],
+    "paramSchema": {
+      "cfg_scale": { "type": "number", "default": null, "min": 0, "max": 20, "step": 0.01, "label": "CFG 强度 cfg_scale", "labelEn": "CFG scale (cfg_scale)", "placeholder": "留空按 cot 取默认（off 时 1.01，否则 1.0）", "placeholderEn": "Leave empty for cot-dependent default (1.01 when off, else 1.0)" },
+      "num_inference_steps": { "type": "integer", "default": 32, "min": 1, "max": 200, "step": 1, "label": "ODE 步数 num_inference_steps", "labelEn": "ODE steps (num_inference_steps)" },
+      "abc_temperature": { "type": "number", "default": 0.7, "min": 0, "max": 5, "step": 0.05, "label": "ABC 规划采样温度", "labelEn": "ABC planner temperature" },
+      "abc_top_p": { "type": "number", "default": 0.9, "min": 0.01, "max": 1, "step": 0.01, "label": "ABC top_p", "labelEn": "ABC top_p" },
+      "abc_top_k": { "type": "integer", "default": 30, "min": 1, "max": 500, "step": 1, "label": "ABC top_k", "labelEn": "ABC top_k" },
+      "abc_repetition_penalty": { "type": "number", "default": 1.005, "min": 0.01, "max": 5, "step": 0.001, "label": "ABC 重复惩罚", "labelEn": "ABC repetition penalty" },
+      "abc_penalty_window": { "type": "integer", "default": 100, "min": 1, "max": 4096, "step": 1, "label": "ABC 惩罚窗口", "labelEn": "ABC penalty window" },
+      "abc_min_tokens": { "type": "integer", "default": 32, "min": 0, "max": 4096, "step": 1, "label": "ABC 最少 token", "labelEn": "ABC min tokens" },
+      "abc_max_tokens": { "type": "integer", "default": 4096, "min": 32, "max": 16384, "step": 1, "label": "ABC 最多 token", "labelEn": "ABC max tokens" },
+      "semantic_temperature": { "type": "number", "default": 1.0, "min": 0, "max": 5, "step": 0.05, "label": "语义 codec 采样温度", "labelEn": "Semantic codec temperature" },
+      "semantic_top_p": { "type": "number", "default": 0.95, "min": 0.01, "max": 1, "step": 0.01, "label": "语义 top_p", "labelEn": "Semantic top_p" },
+      "semantic_top_k": { "type": "integer", "default": 100, "min": 1, "max": 1000, "step": 1, "label": "语义 top_k", "labelEn": "Semantic top_k" },
+      "semantic_repetition_penalty": { "type": "number", "default": 1.2, "min": 0.01, "max": 5, "step": 0.01, "label": "语义重复惩罚", "labelEn": "Semantic repetition penalty" },
+      "semantic_penalty_window": { "type": "integer", "default": 50, "min": 1, "max": 4096, "step": 1, "label": "语义惩罚窗口", "labelEn": "Semantic penalty window" },
+      "semantic_min_tokens": { "type": "integer", "default": 200, "min": 0, "max": 9000, "step": 10, "label": "语义最少 token", "labelEn": "Semantic min tokens" },
+      "semantic_max_tokens": { "type": "integer", "default": 9000, "min": 200, "max": 32768, "step": 10, "label": "语义最多 token", "labelEn": "Semantic max tokens" }
+    }
   }
 ]

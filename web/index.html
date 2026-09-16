@@ -134,6 +134,25 @@
           <div id="sep-result"></div>
         </div>
 
+        <!-- YuE2 音乐生成面板 -->
+        <div class="card panel-card hidden" id="panel-music">
+          <h2 id="music-title">音乐生成</h2>
+          <label><span data-i18n="music.styleLabel">音乐风格 style</span><textarea id="music-style" rows="2" data-i18n-placeholder="music.stylePlaceholder" placeholder="English, indie pop, bright acoustic guitar, soft drums, warm lead vocal"></textarea></label>
+          <label><span data-i18n="music.lyricsLabel">歌词 lyrics</span><textarea id="music-lyrics" rows="8" data-i18n-placeholder="music.lyricsPlaceholder" placeholder="[Verse]"></textarea></label>
+          <div class="hint" data-i18n="music.lyricsHint">风格与歌词均为必填；建议用 [Verse] / [Chorus] 等段落标记组织歌词。生成一首歌通常需要数分钟。</div>
+          <div class="grid">
+            <label><span data-i18n="music.cotLabel">规划模式 cot</span><select id="music-cot"></select></label>
+            <label><span data-i18n="music.seedLabel">随机种子 seed</span><input id="music-seed" type="text" inputmode="numeric" data-i18n-placeholder="music.seedPlaceholder" placeholder="831001"></label>
+          </div>
+          <label><span data-i18n="music.abcLabel">外部 ABC 乐谱（可选，内联）</span><textarea id="music-abc" rows="4" spellcheck="false" data-i18n-placeholder="music.abcPlaceholder" placeholder="X:1"></textarea></label>
+          <div class="hint" data-i18n="music.abcHint">需要外部旋律条件时填写内联 ABC；cot=off 时不能携带 ABC。</div>
+          <details id="music-advanced"><summary data-i18n="common.advanced">高级参数</summary><div class="grid" id="music-advanced-grid"></div></details>
+          <button id="music-submit" class="btn" data-i18n="music.submit">生成音乐</button>
+          <div id="music-msg" class="msg"></div>
+          <div id="music-stats" class="task-stats"></div>
+          <div id="music-result"></div>
+        </div>
+
         <!-- OTHER 面板 -->
         <div class="card panel-card hidden" id="panel-other">
           <h2 id="other-title">工具</h2>
