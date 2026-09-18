@@ -1358,7 +1358,8 @@ $("mdl-start").onclick = async () => {
   const token = $("mdl-token").value.trim();
   if (token) body.token = token;
   const endpoint = $("mdl-endpoint").value;
-  if (endpoint) body.endpoint = endpoint;
+  if (endpoint === "modelscope") body.source = "modelscope";
+  else if (endpoint) body.endpoint = endpoint;
   const btn = $("mdl-start");
   btn.disabled = true;
   try {

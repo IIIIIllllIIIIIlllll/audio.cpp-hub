@@ -1,9 +1,11 @@
-/target/
-/build/
+/legacy/target/
+/legacy/build/
 /logs/
 /run/
 /data/
 /ssl/
 /models/
-/launcher/build/
+/legacy/launcher/build/
 /releases/
+/audio.cpp-hub
+/audio.cpp-hub.exe
