@@ -532,14 +532,15 @@ func (m *HistoryManager) groupExistsLocked(modelID, groupID string) bool {
 }
 
 // readGroupsLocked 读分组文件；不存在/为空/损坏即空列表（调用方须持锁）。
+// 注意必须返回非 nil 空切片：nil 会序列化成 JSON null，前端按数组用会抛 TypeError。
 func (m *HistoryManager) readGroupsLocked(modelID string) []map[string]any {
 	data, err := os.ReadFile(filepath.Join(historyDir(modelID), historyGroupsFile))
 	if err != nil || len(strings.TrimSpace(string(data))) == 0 {
-		return nil
+		return []map[string]any{}
 	}
 	var groups []map[string]any
-	if err := json.Unmarshal(data, &groups); err != nil {
-		return nil
+	if err := json.Unmarshal(data, &groups); err != nil || groups == nil {
+		return []map[string]any{}
 	}
 	return groups
 }

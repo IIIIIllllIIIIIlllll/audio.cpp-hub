@@ -180,6 +180,7 @@ func (m *InstanceManager) Start(p StartParams) (*Instance, error) {
 	cmd := exec.Command(p.ExecPath, "--config", absServerJSON)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
+	hideChildWindow(cmd)
 	if len(p.Env) > 0 {
 		env := map[string]string{}
 		for _, kv := range os.Environ() {
@@ -444,6 +445,7 @@ func ListDevices(execPath string, env map[string]string) (map[string]any, error)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, execPath, "--list-devices")
+	hideChildWindow(cmd)
 	if len(env) > 0 {
 		cmd.Env = os.Environ()
 		for k, v := range env {

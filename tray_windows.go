@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/getlantern/systray"
 )
@@ -137,6 +136,6 @@ func psEscape(s string) string {
 func runPowerShell(script string) bool {
 	cmd := exec.Command("powershell.exe", "-ExecutionPolicy", "Bypass", "-NoProfile",
 		"-WindowStyle", "Hidden", "-Command", script)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	hideChildWindow(cmd)
 	return cmd.Run() == nil
 }
