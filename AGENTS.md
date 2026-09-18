@@ -23,7 +23,7 @@ audio.cpp-hub 是 [audio.cpp](https://github.com/0xShug0/audio.cpp) 的 Web 管�
 - Go 1.27，标准库为主；第三方依赖仅两个：`github.com/getlantern/systray`（Windows 托盘）、`golang.org/x/sys`（Windows 磁盘空间预检）
 - 前端：`web/` 下纯原生 HTML/CSS/JS（`app.js`、`i18n.js` 中英双语、`wav.js` WAV 处理等），无构建工具，由 Go 的 `http.FileServer` 直接从工作目录的 `web/` 提供
 - 模型清单 `models.json` / `model-packages.json` 在仓库根目录，`go:embed` 进二进制
-- 原 Java 版（Netty）已归档到 `legacy/`（src/lib/launcher/pom.xml 等），**仅供查阅，不再维护**；其行为语义是 Go 版移植的参照
+- 原 Java 版（Netty）已从 main 分支移除，完整备份在 `backup` 分支（含 git 历史）；其行为语义是 Go 版移植的参照
 
 ## 目录与模块划分
 
@@ -62,7 +62,6 @@ audio.cpp-hub 是 [audio.cpp](https://github.com/0xShug0/audio.cpp) 的 Web 管�
 ├── icon.ico              # 托盘图标（go:embed）
 ├── go.mod / go.sum
 web/                      # 前端静态文件（无构建步骤）
-legacy/                   # 原 Java 版归档（src/lib/launcher/pom.xml/.classpath/.project/.settings），仅供查阅
 .github/workflows/        # 发布流水线（见「发布与部署」）
 ```
 
